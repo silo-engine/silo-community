@@ -24,6 +24,7 @@ IMAGES_PATH=""
 OUTPUT_DIR=""
 PACKAGE=false
 DEFAULT_SILO_BASE_IMAGE_URL="" # will hold the resolved default silo base image URL for the current system's CPU architecture, which is resolved later in the script.
+DEFAULT_SILO_BASE_IMAGE_CHECKSUM="" # will hold the resolved default silo base image checksum for the current system's CPU architecture, which is resolved later in the script.
 STANDARD__USER="${SUDO_USER:-$(id -un)}"  # as the script is run with sudo, this will be the user that invoked sudo.
 
 
@@ -65,20 +66,26 @@ resolveDefaultBaseImageURLForArchitecture() {
 
     
     local default_base_image_url_for_arch
+    local default_base_image_checksum_for_arch
     case "$arch" in
         "amd64")
             default_base_image_url_for_arch=$(parseDefaultBaseImageFromCatalogue "$arch" "$catalogue_file")
+            default_base_image_checksum_for_arch=$(parseDefaultBaseImageChecksumFromCatalogue "$arch" "$catalogue_file")
             ;;
         "arm64")
             default_base_image_url_for_arch=$(parseDefaultBaseImageFromCatalogue "$arch" "$catalogue_file")
+            default_base_image_checksum_for_arch=$(parseDefaultBaseImageChecksumFromCatalogue "$arch" "$catalogue_file")
             ;;
         *)
             echo "Error: Unsupported architecture '$arch'. Supported architectures are 'amd64' and 'arm64'." >&2
             return 1
             ;;
     esac
-
-    echo "$default_base_image_url_for_arch"
+    
+    # return image URL and checksum for the architecture, which will be stored in global variables for later use.
+    DEFAULT_SILO_BASE_IMAGE_URL="$default_base_image_url_for_arch"
+    DEFAULT_SILO_BASE_IMAGE_CHECKSUM="$default_base_image_checksum_for_arch"    
+    #echo "$default_base_image_url_for_arch"
 }
 
 #
@@ -133,6 +140,50 @@ parseDefaultBaseImageFromCatalogue() {
     fi
 
     echo "$base_image_url"
+}
+
+parseDefaultBaseImageChecksumFromCatalogue() {
+    local arch="$1"
+    local catalogue_file="$2"
+
+    if [[ ! -f "$catalogue_file" ]]; then
+        echo "Error: Base image catalogue file '$catalogue_file' not found." >&2
+        return 1
+    fi
+
+    # parse the default base image object for the specified architecture from the catalogue JSON file.
+    local default_base_image
+    default_base_image=$(jq --arg arch "$arch" \
+    '.["silo-images"][if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
+     "$catalogue_file")
+
+    # where we've failed to find a default base image for the architecture, return an error.
+    if [[ -z "$default_base_image" || "$default_base_image" == "null" ]]; then
+        echo "Error: Default base image for architecture '$arch' not found in catalogue." >&2
+        return 1
+    fi
+
+    # next store each of the properties of the default base image object into variables for later use.
+    local distro
+    local version
+    local release_version
+    distro=$(echo "$default_base_image" | jq -r '.distro')
+    version=$(echo "$default_base_image" | jq -r '.version')
+    release_version=$(echo "$default_base_image" | jq -r '.release_version')
+
+    # finally iterate through the silo-images[$arch] array to find the matching base image object and return its checksum.
+    local base_image_checksum
+    base_image_checksum=$(jq --arg arch "$arch" --arg distro "$distro" --arg version "$version" --arg release_version "$release_version" \
+    '.["silo-images"][$arch][] | select(.distro == $distro and .version == $version and .release_version == $release_version) | .release_checksum' \
+    "$catalogue_file")
+
+     # if we failed to find a matching base image object and/or its checksum, return an error.
+    if [[ -z "$base_image_checksum" || "$base_image_checksum" == "null" ]]; then
+        echo "Error: Matching default base image for architecture '$arch' not found in catalogue." >&2
+        return 1
+    fi
+
+    echo "$base_image_checksum"
 }
 
 
@@ -233,9 +284,10 @@ mv cmd/silo/silo "$releaseDir/" || { echo "Error: Failed to move Silo binary to 
 
 # next resolve the default base image for the system's CPU architecture and store it to a variable for later use.
 echo "Resolving URL of default base image for current system architecture..."
-DEFAULT_SILO_BASE_IMAGE_URL=$(resolveDefaultBaseImageURLForArchitecture) || { echo "Error: Failed to resolve default base image URL for system architecture"; exit 1; }
+resolveDefaultBaseImageURLForArchitecture || { echo "Error: Failed to resolve default base image URL for system architecture"; exit 1; }
 
 echo "Default base image URL for current system architecture: $DEFAULT_SILO_BASE_IMAGE_URL"
+echo "Default base image checksum for current system architecture: $DEFAULT_SILO_BASE_IMAGE_CHECKSUM"
 
 # next create resources directory and copy the images into it
 #echo "Copying images to release directory..."
@@ -260,6 +312,7 @@ if [ "$PACKAGE" = true ]; then
 else
     
     echo "Packaging skipped. Moving release directory to output directory..."
+    rm -rf "$OUTPUT_DIR" && mkdir -p "$OUTPUT_DIR" || { echo "Error: Failed to clean output directory"; exit 1; }
     mv "$releaseDir" "$OUTPUT_DIR/" || { echo "Error: Failed to move release directory to output directory"; exit 1; }
 fi
 
