@@ -23,8 +23,156 @@ VERSION="1.0.0"
 IMAGES_PATH=""
 OUTPUT_DIR=""
 PACKAGE=false
+DEFAULT_SILO_BASE_IMAGE_URL="" # will hold the resolved default silo base image URL for the current system's CPU architecture, which is resolved later in the script.
+STANDARD__USER="${SUDO_USER:-$(id -un)}"  # as the script is run with sudo, this will be the user that invoked sudo.
 
 
+# cleanup to always run on exit, regardless of success or failure
+cleanup() {
+    local status=$?
+    trap - EXIT ERR
+
+    echo "Cleaning up..."
+    rm -rf silo-images
+    rm -f silo-image-catalogue.json
+
+    exit $status
+}
+
+# ensure cleanup is called on exit or error
+trap cleanup EXIT
+trap 'exit $?' ERR
+
+
+
+# Resolves the default base image for the system's CPU architecture, to do this
+# it implicitly:
+# 1. Determines the system's CPU architecture (amd64 or arm64)
+# 2. Pulls down the silo-images repository to access the base image catalogue JSON file
+# 3. Parses the default base image for the architecture from the catalogue
+# 4. Retuens the URL that points to the default base image for the architecture, 
+#    or an error if the architecture is unsupported or the catalogue cannot be accessed.
+resolveDefaultBaseImageURLForArchitecture() {
+ 
+    # query the system's CPU architecture
+    local arch
+    arch=$(getSystemCPUArchitecture)
+
+    # pulls down the silo-images repository to access the base image catalogue JSON file
+    # and places it in the current directory
+    acquireSiloBaseImageCatalogueFileFromSiloImagesRepo || { echo "Error: Failed to acquire base image catalogue from silo-images repository." >&2; return 1; }
+    local catalogue_file="./silo-image-catalogue.json"
+
+    
+    local default_base_image_url_for_arch
+    case "$arch" in
+        "amd64")
+            default_base_image_url_for_arch=$(parseDefaultBaseImageFromCatalogue "$arch" "$catalogue_file")
+            ;;
+        "arm64")
+            default_base_image_url_for_arch=$(parseDefaultBaseImageFromCatalogue "$arch" "$catalogue_file")
+            ;;
+        *)
+            echo "Error: Unsupported architecture '$arch'. Supported architectures are 'amd64' and 'arm64'." >&2
+            return 1
+            ;;
+    esac
+
+    echo "$default_base_image_url_for_arch"
+}
+
+#
+downloadDefaultSiloBaseImageForArchitecture() {
+    local image_url="$1"
+
+}
+
+   
+
+parseDefaultBaseImageFromCatalogue() {
+    local arch="$1"
+    local catalogue_file="$2"
+
+    if [[ ! -f "$catalogue_file" ]]; then
+        echo "Error: Base image catalogue file '$catalogue_file' not found." >&2
+        return 1
+    fi
+
+    # parse the default base image object for the specified archotecture from the catalogue JSON file.
+    # which is expected to be an object that looks as follows:
+    # {"distro": "ubuntu", "version": "25.04", "release_version": "1792376224294092687"}
+    local default_base_image
+    default_base_image=$(jq --arg arch "$arch" \
+    '.["silo-images"][if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
+     "$catalogue_file")
+
+    # where we've failed to find a default base image for the architecture, return an error.
+    if [[ -z "$default_base_image" || "$default_base_image" == "null" ]]; then
+        echo "Error: Default base image for architecture '$arch' not found in catalogue." >&2
+        return 1
+    fi
+
+    # next store each of the properties of the default base image object into variables for later use.
+    local distro
+    local version
+    local release_version
+    distro=$(echo "$default_base_image" | jq -r '.distro')
+    version=$(echo "$default_base_image" | jq -r '.version')
+    release_version=$(echo "$default_base_image" | jq -r '.release_version')
+
+    # finally iterate through the  silo-images[$arch] array to find the matching base image object and return its URL.
+    local base_image_url
+    base_image_url=$(jq --arg arch "$arch" --arg distro "$distro" --arg version "$version" --arg release_version "$release_version" \
+    '.["silo-images"][$arch][] | select(.distro == $distro and .version == $version and .release_version == $release_version) | .image_url' \
+    "$catalogue_file")
+
+     # if we failed to find a mathcing base image object and/or its URL, return an error.
+    if [[ -z "$base_image_url" || "$base_image_url" == "null" ]]; then
+        echo "Error: Matching default base image for architecture '$arch' not found in catalogue." >&2
+        return 1
+    fi
+
+    echo "$base_image_url"
+}
+
+
+# returns the system's CPU architecture i.e. amd64 or arm64, or an error if the architecture is unsupported.
+getSystemCPUArchitecture() {
+    local arch
+    arch=$(uname -m)
+
+    case "$arch" in
+        "x86_64")
+            echo "amd64"
+            ;;
+        "aarch64")
+            echo "arm64"
+            ;;
+        *)
+            echo "Error: Unsupported architecture '$arch'. Supported architectures are 'amd64' and 'arm64'." >&2
+            return 1
+            ;;
+    esac
+}   
+
+# acquires the base image catalogue JSON file from the silo-images repository.
+# and places it in the current directory.
+acquireSiloBaseImageCatalogueFileFromSiloImagesRepo() {
+    echo "Acquiring Silo base image catalogue..."
+
+     # clone the silo-images repository to access the base image catalogue JSON file
+     if ! sudo -u "$STANDARD__USER" git clone --depth 1 \
+        https://github.com/silo-engine/silo-images.git ; then
+        echo "Error: Failed to clone silo-images repository." >&2
+        return 1
+    fi
+
+    # Copy the base image catalogue JSON file to the current directory
+    cp silo-images/silo-image-catalogue.json . || { echo "Error: Failed to copy base image catalogue." >&2; return 1; }
+
+     # Remove the silo-images directory after copying the base image catalogue
+    rm -rf silo-images
+}
 
 # parse command line arguments, where:
 # -o|--output specifies the output directory for the final zip file
@@ -83,10 +231,16 @@ mkdir -p "$releaseDir" || { echo "Error: Failed to create release directory"; ex
 echo "Creating release directory..."
 mv cmd/silo/silo "$releaseDir/" || { echo "Error: Failed to move Silo binary to release directory"; exit 1; }
 
+# next resolve the default base image for the system's CPU architecture and store it to a variable for later use.
+echo "Resolving URL of default base image for current system architecture..."
+DEFAULT_SILO_BASE_IMAGE_URL=$(resolveDefaultBaseImageURLForArchitecture) || { echo "Error: Failed to resolve default base image URL for system architecture"; exit 1; }
+
+echo "Default base image URL for current system architecture: $DEFAULT_SILO_BASE_IMAGE_URL"
+
 # next create resources directory and copy the images into it
-echo "Copying images to release directory..."
-mkdir -p "$releaseDir/res" || { echo "Error: Failed to create resources directory"; exit 1; }
-cp -a "$IMAGES_PATH" "$releaseDir/res/" || { echo "Error: Failed to copy images to release directory"; exit 1; }
+#echo "Copying images to release directory..."
+#mkdir -p "$releaseDir/res" || { echo "Error: Failed to create resources directory"; exit 1; }
+#cp -a "$IMAGES_PATH" "$releaseDir/res/" || { echo "Error: Failed to copy images to release directory"; exit 1; }
 
 # zip up the release directory from its parent so all paths are relative and the archive
 # file itself is never accidentally considered part of the input tree.

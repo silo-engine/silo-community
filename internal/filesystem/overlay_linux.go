@@ -22,7 +22,7 @@ func SetupOverlay(s *session.Session) error {
 	//if err := injectDNS(s.Upper); err != nil {
 	//	return err
 	//}
-//
+	//
 	//// OverlayFS expects the lower filesystem to be the directory that normally
 	//// represents the root filesystem.
 	//   COMMENTED OUT - The lower layer is NO LONGER the host's root file system, but rather a minimal filesystem that contains only the files necessary to run a shell.
@@ -32,18 +32,18 @@ func SetupOverlay(s *session.Session) error {
 	// files necessary to run a shell. This is done to avoid polluting the overlay
 	// with the host's root file system
 	exe, err := os.Executable()
-    if err != nil {
-        return fmt.Errorf("get executable path: %w", err)
-    }
-    
-    resDir := filepath.Join(filepath.Dir(exe), "res")
-    
-    lower := filepath.Join(
-        resDir,
-        "silo-images",
-        "arm64",
-        "ubuntu-24.04-LTS",
-    )
+	if err != nil {
+		return fmt.Errorf("get executable path: %w", err)
+	}
+
+	resDir := filepath.Join(filepath.Dir(exe), "res")
+
+	lower := filepath.Join(
+		resDir,
+		"silo-images",
+		"arm64",
+		"ubuntu-25.04--arm64",
+	)
 
 	options := fmt.Sprintf(
 		"lowerdir=%s,upperdir=%s,workdir=%s",
