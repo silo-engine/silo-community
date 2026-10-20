@@ -88,13 +88,37 @@ resolveDefaultBaseImageURLForArchitecture() {
     #echo "$default_base_image_url_for_arch"
 }
 
-#
+# downloads default silo base image at the specified URL for the current system's 
+# CPU architecture, and saves it to the current directory. 
+# Note: the function implicitly takes care of calculating and verifying the SHA256 checksum of the downloaded base image 
+# against the expected checksum as defined in the base image catalogue.
 downloadDefaultSiloBaseImageForArchitecture() {
     local image_url="$1"
 
+    if [[ -z "$image_url" ]]; then
+        echo "Error: Image URL not provided." >&2
+        return 1
+    fi
+
+    # make temp directory for the base image download using mktemp to avoid conflicts with existing files and ensure a clean environment.
+    baseImagesTemp=$(mktemp -d "${TMPDIR:-/tmp}/silo-base-image.XXXXXX" || { echo "Error: Failed to create temporary directory for base image download." >&2; return 1; })
+     
+    # download the base image to the temp directory, using wget.
+    wget -O "$baseImagesTemp/silo-base-image.tar.gz" "$image_url" || { echo "Error: Failed to download base image from URL '$image_url'." >&2; return 1; }
+
+     # call SHA256 checksum of the downloaded base image tar.gz file and compare it to the expected checksum for the architecture, which is stored in a global variable.
+    local downloaded_checksum
+    downloaded_checksum=$(sha256sum "$baseImagesTemp/silo-base-image.tar.gz" | awk '{print $1}')
+    if [[ "$downloaded_checksum" != "$DEFAULT_SILO_BASE_IMAGE_CHECKSUM" ]]; then
+        echo "Error: Checksum verification failed for downloaded base image. Expected: $DEFAULT_SILO_BASE_IMAGE_CHECKSUM, Got: $downloaded_checksum" >&2
+        return 1
+    fi
+    
+    echo "Base image downloaded and verified successfully. Saved to: $baseImagesTemp/silo-base-image.tar.gz"
+
 }
 
-   
+    
 
 parseDefaultBaseImageFromCatalogue() {
     local arch="$1"
@@ -129,7 +153,7 @@ parseDefaultBaseImageFromCatalogue() {
 
     # finally iterate through the  silo-images[$arch] array to find the matching base image object and return its URL.
     local base_image_url
-    base_image_url=$(jq --arg arch "$arch" --arg distro "$distro" --arg version "$version" --arg release_version "$release_version" \
+    base_image_url=$(jq -r --arg arch "$arch" --arg distro "$distro" --arg version "$version" --arg release_version "$release_version" \
     '.["silo-images"][$arch][] | select(.distro == $distro and .version == $version and .release_version == $release_version) | .image_url' \
     "$catalogue_file")
 
@@ -173,7 +197,7 @@ parseDefaultBaseImageChecksumFromCatalogue() {
 
     # finally iterate through the silo-images[$arch] array to find the matching base image object and return its checksum.
     local base_image_checksum
-    base_image_checksum=$(jq --arg arch "$arch" --arg distro "$distro" --arg version "$version" --arg release_version "$release_version" \
+    base_image_checksum=$(jq -r --arg arch "$arch" --arg distro "$distro" --arg version "$version" --arg release_version "$release_version" \
     '.["silo-images"][$arch][] | select(.distro == $distro and .version == $version and .release_version == $release_version) | .release_checksum' \
     "$catalogue_file")
 
@@ -187,7 +211,8 @@ parseDefaultBaseImageChecksumFromCatalogue() {
 }
 
 
-# returns the system's CPU architecture i.e. amd64 or arm64, or an error if the architecture is unsupported.
+# returns the system's CPU architecture i.e. amd64 or arm64, or 
+# an error if the architecture is unsupported.
 getSystemCPUArchitecture() {
     local arch
     arch=$(uname -m)
@@ -288,6 +313,11 @@ resolveDefaultBaseImageURLForArchitecture || { echo "Error: Failed to resolve de
 
 echo "Default base image URL for current system architecture: $DEFAULT_SILO_BASE_IMAGE_URL"
 echo "Default base image checksum for current system architecture: $DEFAULT_SILO_BASE_IMAGE_CHECKSUM"
+
+# download the default silo base image for the current system's CPU architecture and save it to the release directory.
+echo "Downloading default base image for current system architecture..."
+downloadDefaultSiloBaseImageForArchitecture "$DEFAULT_SILO_BASE_IMAGE_URL" || { echo "Error: Failed to download default base image for system architecture"; exit 1; }
+
 
 # next create resources directory and copy the images into it
 #echo "Copying images to release directory..."
