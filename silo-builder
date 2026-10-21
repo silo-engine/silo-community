@@ -139,7 +139,7 @@ downloadDefaultSiloBaseImageForArchitecture() {
     # parse the default base image object for the specified architecture from the catalogue JSON file.
     local default_base_image
     default_base_image=$(jq --arg arch "$arch" \
-    '.["silo-images"][if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
+    '.[if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
      "$catalogue_file")
 
     # where we've failed to find a default base image for the architecture, return an error.
@@ -170,7 +170,7 @@ parseDefaultBaseImageFromCatalogue() {
     # {"distro": "ubuntu", "version": "25.04", "release_version": "1792376224294092687"}
     local default_base_image
     default_base_image=$(jq --arg arch "$arch" \
-    '.["silo-images"][if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
+    '.[if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
      "$catalogue_file")
 
     # where we've failed to find a default base image for the architecture, return an error.
@@ -216,7 +216,7 @@ parseDefaultBaseImageChecksumFromCatalogue() {
     # parse the default base image object for the specified architecture from the catalogue JSON file.
     local default_base_image
     default_base_image=$(jq --arg arch "$arch" \
-    '.["silo-images"][if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
+    '.[if $arch == "arm64" then "defaultArm64Image" else "defaultAmd64Image" end]' \
      "$catalogue_file")
 
     # where we've failed to find a default base image for the architecture, return an error.

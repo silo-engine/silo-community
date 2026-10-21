@@ -73,8 +73,6 @@ func (m *MountHandler) Apply(root string) error {
 		{src: "/etc/resolv.conf", dst: filepath.Join(root, "etc", "resolv.conf")},
 		{src: "/etc/hosts", dst: filepath.Join(root, "etc", "hosts")},
 		{src: "/etc/ssl/certs", dst: filepath.Join(root, "etc", "ssl", "certs")},
-		//{src: "/tmp/.X11-unix", dst: filepath.Join(root, "tmp", ".X11-unix")},   //not required for now remove in later versions.
-		//{src: xauthority, dst: filepath.Join(root, "run", "silo", "xauthority")}, //not required for now remove in later versions.
 	} {
 		if err := bindIfExists(pair.src, pair.dst); err != nil {
 			return err

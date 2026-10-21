@@ -79,9 +79,9 @@ func RunShell(s *session.Session) error {
 	}
 
 	hostXAuthority := os.Getenv("XAUTHORITY")
-    if hostXAuthority == "" {
-    	hostXAuthority = filepath.Join(os.Getenv("HOME"), ".Xauthority")
-    }
+	if hostXAuthority == "" {
+		hostXAuthority = filepath.Join(os.Getenv("HOME"), ".Xauthority")
+	}
 
 	//this is where specific environment variables are set for the shell to run in the overlay.
 	//perhaps in later versions, this could be used as the mechanism to pass variables provided by
@@ -89,7 +89,6 @@ func RunShell(s *session.Session) error {
 	cmd.Env = append(env,
 		"EMPTY_SHELL=1",
 		"EMPTY_SHELL_ROOT=/",
-	//	"XAUTHORITY=/run/silo/xauthority",  //Not required for now remove in later versions.
 	)
 
 	if err := cmd.Run(); err != nil {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/SharefulNetworks/shareful-utils-silo/internal/catalogue"
 	"github.com/SharefulNetworks/shareful-utils-silo/internal/session"
 	"golang.org/x/sys/unix"
 )
@@ -17,16 +18,26 @@ import (
 // inside Silo are redirected to the session's temporary upper layer.
 func SetupOverlay(s *session.Session) error {
 
-	// inject the host's /etc/resolv.conf into the overlay so that DNS resolution works inside Silo.
-	//NB: COMMENTED OUT - DNS will now be provided by minimal file system
-	//if err := injectDNS(s.Upper); err != nil {
-	//	return err
-	//}
-	//
-	//// OverlayFS expects the lower filesystem to be the directory that normally
-	//// represents the root filesystem.
-	//   COMMENTED OUT - The lower layer is NO LONGER the host's root file system, but rather a minimal filesystem that contains only the files necessary to run a shell.
-	//lower := "/"
+	//get the current architecture of the host system
+	arch, err := catalogue.GetSystemArchType()
+	if err != nil {
+		return fmt.Errorf("An error occurred while attempting to resolve the current CPU architecture: %w", err)
+	}
+	if arch != catalogue.Arm64 && arch != catalogue.Amd64 {
+		return fmt.Errorf("Silo only supports amd64 and arm64 architectures. The current architecture is %s", arch)
+	}
+		
+
+	//instantiate a new CatalogueManager to load the silo image catalogues from JSON files in the res/silo-images/catalogues directory
+	// we use this subsystem to obtain reference to the default base image details for the current architecture.
+	catalogueManager := catalogue.NewCatalogueManager()
+	defaultSiloImage, err := catalogueManager.GetBaseImageCatalogueDefaultImage(arch)
+	if err != nil {
+		return fmt.Errorf("get base image catalogue default image: %w", err)
+	}
+
+	//build default image name
+	defaultSiloImageName := defaultSiloImage.Distro + "-" + defaultSiloImage.Version + "--" + string(arch);
 
 	// The overlay's lower layer is now a minimal filesystem that contains only the
 	// files necessary to run a shell. This is done to avoid polluting the overlay
@@ -42,7 +53,8 @@ func SetupOverlay(s *session.Session) error {
 		resDir,
 		"silo-images",
 		"arm64",
-		"ubuntu-25.04--arm64",
+		defaultSiloImageName+"-release",
+		defaultSiloImageName,
 	)
 
 	options := fmt.Sprintf(
