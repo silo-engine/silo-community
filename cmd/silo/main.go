@@ -8,10 +8,15 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/SharefulNetworks/shareful-utils-silo/internal/catalogue"
 	"github.com/SharefulNetworks/shareful-utils-silo/internal/filesystem"
 	"github.com/SharefulNetworks/shareful-utils-silo/internal/namespace"
 	"github.com/SharefulNetworks/shareful-utils-silo/internal/session"
 )
+
+// TODO remove the direct instantiation of these subsystems once the top-level SiloApplicationManager is implemented. This will allow for better testability and separation of concerns.
+var catalogueManager = catalogue.NewCatalogueManager()
+var overlayManager = filesystem.NewOverlayManager(catalogueManager)
 
 func main() {
 	if os.Geteuid() != 0 {
@@ -82,7 +87,7 @@ func runTransientShell() error {
 
 func runShell(s *session.Session) error {
 	cleanup := func() {
-		filesystem.TeardownOverlay(s)
+		overlayManager.TeardownOverlay(s)
 		if s != nil && s.Transient {
 			s.Cleanup()
 		}
@@ -97,10 +102,10 @@ func runShell(s *session.Session) error {
 		return err
 	}
 
-	if err := filesystem.SetupOverlay(s); err != nil {
+	if err := overlayManager.SetupOverlay(s); err != nil {
 		return err
 	}
-	defer filesystem.TeardownOverlay(s)
+	defer overlayManager.TeardownOverlay(s)
 
 	fmt.Println("Entering Silo...")
 	fmt.Println("Changes made inside this shell are isolated in the overlay.")

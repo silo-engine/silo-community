@@ -24,8 +24,8 @@ type MountHandler struct {
 	mounts []MountSpec
 }
 
-// NewDefaultMountHandler returns the default mount set used by a developer-friendly Silo.
-func NewDefaultMountHandler() *MountHandler {
+// NewMountHandler returns the default mount set used by a developer-friendly Silo.
+func NewMountHandler() *MountHandler {
 	return &MountHandler{
 		mounts: []MountSpec{
 			{Source: "proc", Target: "/proc", Type: "proc", Flags: 0},
@@ -84,11 +84,14 @@ func (m *MountHandler) Apply(root string) error {
 
 // Cleanup unmounts the runtime mounts in the reverse order they were attached.
 func (m *MountHandler) Cleanup(root string) {
+
+	//generic kernel mounts
 	for i := len(m.mounts) - 1; i >= 0; i-- {
 		target := filepath.Join(root, m.mounts[i].Target)
 		unmountIfMounted(target)
 	}
 
+	//explicit host file system mounts.
 	for _, dst := range []string{
 		filepath.Join(root, "etc", "resolv.conf"),
 		filepath.Join(root, "etc", "hosts"),
