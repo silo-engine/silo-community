@@ -12,11 +12,15 @@ import (
 	"github.com/SharefulNetworks/shareful-utils-silo/internal/filesystem"
 	"github.com/SharefulNetworks/shareful-utils-silo/internal/namespace"
 	"github.com/SharefulNetworks/shareful-utils-silo/internal/session"
+	"github.com/SharefulNetworks/shareful-utils-silo/internal/shell"
 )
 
 // TODO remove the direct instantiation of these subsystems once the top-level SiloApplicationManager is implemented. This will allow for better testability and separation of concerns.
 var catalogueManager = catalogue.NewCatalogueManager()
 var overlayManager = filesystem.NewOverlayManager(catalogueManager)
+var processNamespaceManager = namespace.NewProcessNamespaceManager()
+var mountNamespaceManager = namespace.NewMountNamespaceManager()
+var shellManager = shell.NewShellManager(processNamespaceManager)
 
 func main() {
 	if os.Geteuid() != 0 {
@@ -98,10 +102,18 @@ func runShell(s *session.Session) error {
 	defer signal.Stop(sigCh)
 	defer cleanup()
 
-	if err := namespace.EnterMountNamespace(s); err != nil {
+	//if err := namespace.EnterMountNamespace(s); err != nil {
+	//	return err
+	//}
+
+	//crucially we set up the mount namespace before setting up the overlay, otherwise
+	// the overlay will be mounted in the host's mount namespace.
+	if err := mountNamespaceManager.SetupMountNamespace(); err != nil {
 		return err
 	}
 
+	// next setup the filesystem overlay and defer its teardown so that it is cleaned up
+	// when the shell exits.
 	if err := overlayManager.SetupOverlay(s); err != nil {
 		return err
 	}
@@ -111,13 +123,22 @@ func runShell(s *session.Session) error {
 	fmt.Println("Changes made inside this shell are isolated in the overlay.")
 	fmt.Println("Type 'exit' to leave.")
 
+	//setup a goroutine to listen for termination signals and clean up
+	//the overlay and transient session if received.
 	go func() {
 		<-sigCh
 		cleanup()
 		os.Exit(1)
 	}()
 
-	if err := namespace.RunShell(s); err != nil {
+	//if err := namespace.RunShell(s); err != nil {
+	//	return err
+	//}
+
+	//run the shell in the overlay and wait for it to exit. The shell will be
+	// running in a new PID namespace, so it will see itself as PID 1 and can
+	// manage its own processes independently of the host system.
+	if err := shellManager.RunShell(s); err != nil {
 		return err
 	}
 
