@@ -5,22 +5,12 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/silo-engine/silo-community/internal/catalogue"
-	"github.com/silo-engine/silo-community/internal/filesystem"
-	"github.com/silo-engine/silo-community/internal/namespace"
-	"github.com/silo-engine/silo-community/internal/session"
-	"github.com/silo-engine/silo-community/internal/shell"
+	"github.com/silo-engine/silo-community/internal"
 )
 
 // TODO remove the direct instantiation of these subsystems once the top-level SiloApplicationManager is implemented. This will allow for better testability and separation of concerns.
-var catalogueManager = catalogue.NewCatalogueManager()
-var overlayManager = filesystem.NewOverlayManager(catalogueManager)
-var processNamespaceManager = namespace.NewProcessNamespaceManager()
-var mountNamespaceManager = namespace.NewMountNamespaceManager()
-var shellManager = shell.NewShellManager(processNamespaceManager)
+var siloEngine = internal.NewSiloEngine()
 
 func main() {
 	if os.Geteuid() != 0 {
@@ -31,7 +21,7 @@ func main() {
 
 	args := os.Args[1:]
 	if len(args) == 0 {
-		if err := runTransientShell(); err != nil {
+		if err := siloEngine.StartTransientSession(); err != nil {
 			fatal(err)
 		}
 
@@ -44,24 +34,23 @@ func main() {
 			usageAndExit()
 		}
 
-		s, err := session.Create(args[1])
+		s, err := siloEngine.CreateSession(args[1])
 		if err != nil {
 			fatal(err)
 		}
-
 		fmt.Printf("Created Silo environment %q\n", s.Name)
 	case "enter":
 		if len(args) != 2 {
 			usageAndExit()
 		}
 
-		s, err := session.Enter(args[1])
-		if err != nil {
-			fatal(err)
-		}
-		defer s.Cleanup()
+		//s, err := session.Load(args[1])
+		//if err != nil {
+		//	fatal(err)
+		//}
+		//defer s.Cleanup()
 
-		if err := runShell(s); err != nil {
+		if err := siloEngine.StartPersistentSession(args[1]); err != nil {
 			fatal(err)
 		}
 	case "destroy":
@@ -69,7 +58,7 @@ func main() {
 			usageAndExit()
 		}
 
-		if err := session.Destroy(args[1]); err != nil {
+		if err := siloEngine.DestroySession(args[1]); err != nil {
 			fatal(err)
 		}
 
@@ -79,6 +68,21 @@ func main() {
 	}
 }
 
+func usageAndExit() {
+	fmt.Fprintln(os.Stderr, "usage:")
+	fmt.Fprintln(os.Stderr, "  silo - creates and runs an ephemeral, isolated environment, the environment (and all changes made within it) are automatically discarded on exit")
+	fmt.Fprintln(os.Stderr, "  silo create NAME - create a new named, isolated environment. The environment persists until explicitly destroyed.")
+	fmt.Fprintln(os.Stderr, "  silo enter NAME - enter an existing named, isolated environment")
+	fmt.Fprintln(os.Stderr, "  silo destroy NAME - destroy an existing named, isolated environment")
+	os.Exit(1)
+}
+
+func fatal(err error) {
+	fmt.Fprintf(os.Stderr, "silo: %v\n", err)
+	os.Exit(1)
+}
+
+/*
 func runTransientShell() error {
 	s, err := session.NewTransient()
 	if err != nil {
@@ -144,17 +148,4 @@ func runShell(s *session.Session) error {
 
 	return nil
 }
-
-func usageAndExit() {
-	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  silo - creates and runs an ephemeral, isolated environment, the environment (and all changes made within it) are automatically discarded on exit")
-	fmt.Fprintln(os.Stderr, "  silo create NAME - create a new named, isolated environment. The environment persists until explicitly destroyed.")
-	fmt.Fprintln(os.Stderr, "  silo enter NAME - enter an existing named, isolated environment")
-	fmt.Fprintln(os.Stderr, "  silo destroy NAME - destroy an existing named, isolated environment")
-	os.Exit(1)
-}
-
-func fatal(err error) {
-	fmt.Fprintf(os.Stderr, "silo: %v\n", err)
-	os.Exit(1)
-}
+*/

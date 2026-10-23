@@ -74,8 +74,8 @@ func Create(name string) (*Session, error) {
 	return newSession(root, false, name, true)
 }
 
-// Enter opens an existing named environment.
-func Enter(name string) (*Session, error) {
+// Load loads an existing persistent named environment.
+func Load(name string) (*Session, error) {
 	if err := validateName(name); err != nil {
 		return nil, err
 	}
