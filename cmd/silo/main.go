@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/catalogue"
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/filesystem"
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/namespace"
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/session"
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/shell"
+	"github.com/silo-engine/silo-community/internal/catalogue"
+	"github.com/silo-engine/silo-community/internal/filesystem"
+	"github.com/silo-engine/silo-community/internal/namespace"
+	"github.com/silo-engine/silo-community/internal/session"
+	"github.com/silo-engine/silo-community/internal/shell"
 )
 
 // TODO remove the direct instantiation of these subsystems once the top-level SiloApplicationManager is implemented. This will allow for better testability and separation of concerns.

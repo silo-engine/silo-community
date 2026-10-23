@@ -1,4 +1,4 @@
-module github.com/SharefulNetworks/shareful-utils-silo
+module github.com/silo-engine/silo-community
 
 go 1.26.0
 

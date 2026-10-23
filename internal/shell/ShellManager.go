@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/namespace"
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/session"
+	"github.com/silo-engine/silo-community/internal/namespace"
+	"github.com/silo-engine/silo-community/internal/session"
 )
 
 // ShellManager manages the launching of an interactive shell within a Silo session.

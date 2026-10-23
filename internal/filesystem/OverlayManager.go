@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/catalogue"
-	"github.com/SharefulNetworks/shareful-utils-silo/internal/session"
+	"github.com/silo-engine/silo-community/internal/catalogue"
+	"github.com/silo-engine/silo-community/internal/session"
 	"golang.org/x/sys/unix"
 )
 

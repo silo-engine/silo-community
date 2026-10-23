@@ -125,6 +125,8 @@ downloadDefaultSiloBaseImageForArchitecture() {
     # extract the downloaded base image tar.gz file to the release directory. 
     tar -xzf "$baseImagesTemp/silo-base-image.tar.gz" -C "$fullImageReleaseDir" || { echo "Error: Failed to extract base image to release directory." >&2; return 1; }   
 
+    # clean up the temporary directory used for the base image download.
+    rm -rf "$baseImagesTemp" || { echo "Error: Failed to clean up temporary directory '$baseImagesTemp'." >&2; return 1; }
 }
 
  parseDefaultBaseImageMetadataFromCatalogue() {
