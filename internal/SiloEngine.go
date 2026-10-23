@@ -88,10 +88,10 @@ func (se *SiloEngine) CreateSession(sessionName string) (*session.Session, error
 	return s, nil
 }
 
-// DestroySession destroys an existing persistent Silo session with the specified name. The session and all its 
+// DestroySession destroys an existing persistent Silo session with the specified name. The session and all its
 // associated resources are permanently removed. If the specified session does not exist, an error is returned.
 func (se *SiloEngine) DestroySession(sessionName string) error {
-	
+
 	if err := session.Destroy(sessionName); err != nil {
 		return errors.New("An error occurred whilst attempting to destroy the Silo Session: " + err.Error())
 	}
@@ -143,7 +143,7 @@ func (se *SiloEngine) startSession(s *session.Session) error {
 	// running in a new PID namespace, so it will see itself as PID 1 and can
 	// manage its own processes independently of the host system.
 	if err := se.shellManager.RunShell(s); err != nil {
-		return errors.New("An error occurred whilst attempting to start the Silo session: " + err.Error())
+		fmt.Fprintf(os.Stderr, "SILO: An error occurred whilst running the Silo shell: %v\n", err)
 	}
 
 	return nil

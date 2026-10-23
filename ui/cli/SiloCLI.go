@@ -1,0 +1,92 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/silo-engine/silo-community/internal"
+)
+
+// SiloCLI is the command-line interface for the Silo application, providing users with a way to
+// interact with Silo sessions and manage isolated environments through terminal commands.
+type SiloCLI struct {
+	siloEngine *internal.SiloEngine
+}
+
+// NewSiloCLI creates a new instance of SiloCLI.
+func NewSiloCLI() *SiloCLI {
+	return &SiloCLI{
+		siloEngine: internal.NewSiloEngine(),
+	}
+}
+
+// Run starts the SiloCLI, processing command-line arguments and executing the corresponding actions.
+func (scli *SiloCLI) Run() {
+	if os.Geteuid() != 0 {
+		fmt.Fprintln(os.Stderr, "silo: the application must be run as root")
+		fmt.Fprintln(os.Stderr, "usage: sudo ./silo")
+		os.Exit(1)
+	}
+
+	args := os.Args[1:]
+	if len(args) == 0 {
+		if err := scli.siloEngine.StartTransientSession(); err != nil {
+			fatal(err)
+		}
+
+		return
+	}
+
+	switch args[0] {
+	case "create":
+		if len(args) != 2 {
+			usageAndExit()
+		}
+
+		s, err := scli.siloEngine.CreateSession(args[1])
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Created Silo environment %q\n", s.Name)
+	case "enter":
+		if len(args) != 2 {
+			usageAndExit()
+		}
+
+		if err := scli.siloEngine.StartPersistentSession(args[1]); err != nil {
+			fatal(err)
+		}
+	case "destroy":
+		if len(args) != 2 {
+			usageAndExit()
+		}
+
+		if err := scli.siloEngine.DestroySession(args[1]); err != nil {
+			fatal(err)
+		}
+
+		fmt.Printf("Destroyed Silo environment %q\n", args[1])
+	default:
+		usageAndExit()
+	}
+
+}
+
+//helper functions
+
+// usageAndExit helper function prints the usage information for the SiloCLI and exits
+// the program with a non-zero status code.
+func usageAndExit() {
+	fmt.Fprintln(os.Stderr, "usage:")
+	fmt.Fprintln(os.Stderr, "  silo - creates and runs an ephemeral, isolated environment, the environment (and all changes made within it) are automatically discarded on exit")
+	fmt.Fprintln(os.Stderr, "  silo create NAME - create a new named, isolated environment. The environment persists until explicitly destroyed.")
+	fmt.Fprintln(os.Stderr, "  silo enter NAME - enter an existing named, isolated environment")
+	fmt.Fprintln(os.Stderr, "  silo destroy NAME - destroy an existing named, isolated environment")
+	os.Exit(1)
+}
+
+// fatal helper function prints an error message to standard error and exits the program with a non-zero status code.
+func fatal(err error) {
+	fmt.Fprintf(os.Stderr, "silo: %v\n", err)
+	os.Exit(1)
+}
