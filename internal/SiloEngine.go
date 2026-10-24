@@ -63,12 +63,20 @@ func (se *SiloEngine) StartTransientSession() error {
 // made within the session are preserved upon exit. If the specified session does not exist, an error is returned.
 func (se *SiloEngine) StartPersistentSession(sessionName string) error {
 
-	//loads session with the provided name.
+	//loads session with the provided name and defer cleanup to ensure that
+	// resources are released when the shell exits.
 	s, err := session.Load(sessionName)
 	if err != nil {
 		return errors.New("An error occurred whislt attempting to enter existing Silo Session: " + err.Error())
 	}
 	defer s.Cleanup()
+
+	// Acquire lock on the session and defer its release.
+	lock, err := session.AcquireSessionLock(sessionName)
+	if err != nil {
+		return errors.New("An error occurred whilst attempting to acquire a lock on the Silo Session: " + err.Error())
+	}
+	defer lock.Unlock()
 
 	//call helper func to start the silo session.
 	return se.startSession(s)
@@ -92,6 +100,15 @@ func (se *SiloEngine) CreateSession(sessionName string) (*session.Session, error
 // associated resources are permanently removed. If the specified session does not exist, an error is returned.
 func (se *SiloEngine) DestroySession(sessionName string) error {
 
+	//obtain a lock on the session to ensure that it is not in use by another process
+	// before destroying it.
+	lock, err := session.AcquireSessionLock(sessionName)
+	if err != nil {
+		return errors.New("An error occurred whilst attempting to acquire a lock on the Silo Session: " + err.Error() + " please ensure that the session is is not in use by any processes before attempting to destroy it.")
+	}
+	defer lock.Unlock()
+
+	//destroy the persistent session with the provided name.
 	if err := session.Destroy(sessionName); err != nil {
 		return errors.New("An error occurred whilst attempting to destroy the Silo Session: " + err.Error())
 	}

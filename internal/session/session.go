@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/gofrs/flock"
 )
 
-const namedEnvironmentRoot = "/var/lib/silo/envs"
-const transientEnvironmentRoot = "/var/lib/silo/tenvs"
+const NAMED_ENVIRONMENT_ROOT = "/var/lib/silo/envs"
+const TRANSIENT_ENVIRONMENT_ROOT = "/var/lib/silo/tenvs"
+const SESSION_LOCK_FILE = "session.lock"
 
 type Session struct {
 	// Root is the directory containing the session's writable state.
@@ -36,10 +39,10 @@ type Session struct {
 // named sessions into a dedicated directory under the user's home directory.
 func NewTransient() (*Session, error) {
 
-	if err := os.MkdirAll(transientEnvironmentRoot, 0755); err != nil {
+	if err := os.MkdirAll(TRANSIENT_ENVIRONMENT_ROOT, 0755); err != nil {
 		return nil, fmt.Errorf("create transient environment root: %w", err)
 	}
-	root, err := os.MkdirTemp(transientEnvironmentRoot, "temp-")
+	root, err := os.MkdirTemp(TRANSIENT_ENVIRONMENT_ROOT, "temp-")
 	if err != nil {
 		return nil, fmt.Errorf("create transient session directory: %w", err)
 	}
@@ -58,11 +61,11 @@ func Create(name string) (*Session, error) {
 		return nil, err
 	}
 
-	if err := os.MkdirAll(namedEnvironmentRoot, 0755); err != nil {
+	if err := os.MkdirAll(NAMED_ENVIRONMENT_ROOT, 0755); err != nil {
 		return nil, fmt.Errorf("create environment root: %w", err)
 	}
 
-	root := filepath.Join(namedEnvironmentRoot, name)
+	root := filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
 	if err := os.Mkdir(root, 0755); err != nil {
 		if os.IsExist(err) {
 			return nil, fmt.Errorf("environment %q already exists", name)
@@ -80,7 +83,7 @@ func Load(name string) (*Session, error) {
 		return nil, err
 	}
 
-	root := filepath.Join(namedEnvironmentRoot, name)
+	root := filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
 	info, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -103,7 +106,24 @@ func Destroy(name string) error {
 		return err
 	}
 
-	return os.RemoveAll(filepath.Join(namedEnvironmentRoot, name))
+	return os.RemoveAll(filepath.Join(NAMED_ENVIRONMENT_ROOT, name))
+}
+
+func AcquireSessionLock(name string) (*flock.Flock, error) {
+	envPath := filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
+	lockPath := filepath.Join(envPath, "session.lock")
+	fileLock := flock.New(lockPath)
+
+	locked, err := fileLock.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("acquire session lock: %w", err)
+	}
+
+	if !locked {
+		return nil, fmt.Errorf("session is already active")
+	}
+
+	return fileLock, nil
 }
 
 func newSession(root string, transient bool, name string, cleanupOnError bool) (*Session, error) {
