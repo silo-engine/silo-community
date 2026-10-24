@@ -128,7 +128,7 @@ func (se *SiloEngine) startSession(s *session.Session) error {
 	defer se.overlayManager.TeardownOverlay(s)
 
 	fmt.Println("Entering Silo...")
-	fmt.Println("Changes made inside this shell are isolated in the overlay.")
+	fmt.Println("Changes made inside this shell are isolated from the host system.")
 	fmt.Println("Type 'exit' to leave.")
 
 	//setup a goroutine to listen for termination signals and clean up

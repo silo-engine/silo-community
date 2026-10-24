@@ -300,8 +300,8 @@ while [[ $# -gt 0 ]]; do
             OUTPUT_DIR="$2"
             shift 2
             ;;
-        -i|--images)
-            IMAGES_PATH="$2"
+        -i|--ximages)      # this option is currently not used, but is reserved for future use where the user may want to specify additional base silo images to be included in the release package.
+            IMAGES_PATH="$2"  
             shift 2
             ;;
         -p|--package)
@@ -322,10 +322,10 @@ if [[ -z "$OUTPUT_DIR" ]]; then
 fi
 
 # verify that an images path was provided
-if [[ -z "$IMAGES_PATH" ]]; then
-    echo "Error: Images path not specified. Use -i or --images to specify the images path."
-    exit 1
-fi
+#if [[ -z "$IMAGES_PATH" ]]; then
+#    echo "Error: Images path not specified. Use -i or --images to specify the images path."
+#    exit 1
+#fi
 
 # ensure the output target exists before moving files into it
 mkdir -p "$OUTPUT_DIR" || { echo "Error: Failed to create output directory"; exit 1; }

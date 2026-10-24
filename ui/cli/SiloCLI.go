@@ -30,11 +30,8 @@ func (scli *SiloCLI) Run() {
 
 	args := os.Args[1:]
 	if len(args) == 0 {
-		if err := scli.siloEngine.StartTransientSession(); err != nil {
-			fatal(err)
-		}
-
-		return
+		fmt.Fprintln(os.Stderr, "silo: no command provided")
+		usageAndExit()
 	}
 
 	switch args[0] {
@@ -47,15 +44,25 @@ func (scli *SiloCLI) Run() {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Printf("Created Silo environment %q\n", s.Name)
+		fmt.Printf("Created Silo session/environment %q\n", s.Name)
 	case "enter":
-		if len(args) != 2 {
+
+		//if no values was provided with create start a transient session, otherwise start a
+		// persistent session with the provided name.
+		if len(args) == 1 {
+			fmt.Fprintln(os.Stderr, "silo: no session name provided, entering a transient session..")
+			if err := scli.siloEngine.StartTransientSession(); err != nil {
+				fatal(err)
+			}
+		} else if len(args) == 2 {
+			fmt.Fprintln(os.Stderr, "silo: entering session: ", args[1])
+			if err := scli.siloEngine.StartPersistentSession(args[1]); err != nil {
+				fatal(err)
+			}
+		} else {
 			usageAndExit()
 		}
 
-		if err := scli.siloEngine.StartPersistentSession(args[1]); err != nil {
-			fatal(err)
-		}
 	case "destroy":
 		if len(args) != 2 {
 			usageAndExit()
@@ -65,7 +72,7 @@ func (scli *SiloCLI) Run() {
 			fatal(err)
 		}
 
-		fmt.Printf("Destroyed Silo environment %q\n", args[1])
+		fmt.Printf("Destroyed Silo session/environment %q\n", args[1])
 	default:
 		usageAndExit()
 	}
@@ -78,10 +85,11 @@ func (scli *SiloCLI) Run() {
 // the program with a non-zero status code.
 func usageAndExit() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  silo - creates and runs an ephemeral, isolated environment, the environment (and all changes made within it) are automatically discarded on exit")
-	fmt.Fprintln(os.Stderr, "  silo create NAME - create a new named, isolated environment. The environment persists until explicitly destroyed.")
-	fmt.Fprintln(os.Stderr, "  silo enter NAME - enter an existing named, isolated environment")
-	fmt.Fprintln(os.Stderr, "  silo destroy NAME - destroy an existing named, isolated environment")
+	fmt.Fprintln(os.Stderr, "  silo - displays this usage information")
+	fmt.Fprintln(os.Stderr, "  silo enter - creates and enters an ephemeral, session/isolated environment, the environment (and all changes made within it) are automatically discarded on exit")
+	fmt.Fprintln(os.Stderr, "  silo enter [<NAME>] [--create [<NAME>]] - enters an existing named, session/isolated environment. Where the --create [<NAME>] option is provided, a new named environment is created and entered. ")
+	fmt.Fprintln(os.Stderr, "  silo create [<NAME>] - create a new named, isolated environment. The environment persists until explicitly destroyed.")
+	fmt.Fprintln(os.Stderr, "  silo destroy [<NAME>] - destroy an existing named, isolated environment")
 	os.Exit(1)
 }
 
