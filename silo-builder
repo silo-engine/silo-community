@@ -125,6 +125,11 @@ downloadDefaultSiloBaseImageForArchitecture() {
     # extract the downloaded base image tar.gz file to the release directory. 
     tar -xzf "$baseImagesTemp/silo-base-image.tar.gz" -C "$fullImageReleaseDir" || { echo "Error: Failed to extract base image to release directory." >&2; return 1; }   
 
+    # copy the checksum of the downloaded base image to the release directory for reference.
+    # under the file checksum.chk This will later be used by the SiloEngine to ensure exported Sessions
+    # can always be reconstructed with exactly the same base image that was used to create them, even if the base image is updated in the future.
+    echo "$DEFAULT_SILO_BASE_IMAGE_CHECKSUM" > "$fullImageReleaseDir/checksum.chk" || { echo "Error: Failed to write checksum to release directory." >&2; return 1; }
+    
     # clean up the temporary directory used for the base image download.
     rm -rf "$baseImagesTemp" || { echo "Error: Failed to clean up temporary directory '$baseImagesTemp'." >&2; return 1; }
 }
