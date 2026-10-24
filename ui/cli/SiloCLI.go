@@ -59,6 +59,15 @@ func (scli *SiloCLI) Run() {
 			if err := scli.siloEngine.StartPersistentSession(args[1]); err != nil {
 				fatal(err)
 			}
+		} else if len(args) == 3 && args[2] == "--create" {
+			fmt.Fprintln(os.Stderr, "silo: creating and entering session: ", args[1])
+			if _, err := scli.siloEngine.CreateSession(args[1]); err != nil {
+				fatal(err)
+			}
+			if err := scli.siloEngine.StartPersistentSession(args[1]); err != nil {
+				fatal(err)
+			}
+
 		} else {
 			usageAndExit()
 		}
