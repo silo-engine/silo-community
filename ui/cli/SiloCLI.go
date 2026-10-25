@@ -71,7 +71,6 @@ func (scli *SiloCLI) Run() {
 		} else {
 			usageAndExit()
 		}
-
 	case "destroy":
 		if len(args) != 2 {
 			usageAndExit()
@@ -82,6 +81,50 @@ func (scli *SiloCLI) Run() {
 		}
 
 		fmt.Printf("Destroyed Silo session/environment %q\n", args[1])
+	case "images":
+		if len(args) == 1 {
+			fmt.Fprintln(os.Stderr, "silo: no image operation provided")
+			usageAndExit()
+		} else {
+
+			switch args[1] {
+			case "list":
+				//if err := scli.siloEngine.ListBaseImages(); err != nil {
+				//	fatal(err)
+				//}
+			case "update":
+				//if err := scli.siloEngine.UpdateBaseImages(); err != nil {
+				//	fatal(err)
+				//}
+			case "pull":
+
+				//arg 2 should be the id of the image to pull, if not provided print usage and exit.
+				if len(args) < 3 {
+					fmt.Fprintln(os.Stderr, "silo: no image name provided for pull operation")
+					usageAndExit()
+				}
+				imageId := args[2]
+
+				//next search for the optional --catalogue flag and its value, if provided.
+				catalogueName := ""
+				for i, arg := range args {
+					if arg == "--catalogue" && i+1 < len(args) {
+						catalogueName = args[i+1]
+						break
+					}
+				}
+
+				if err := scli.siloEngine.DownloadCatalogueImage(catalogueName, imageId); err != nil {
+					fatal(err)
+				}
+
+			default:
+				fmt.Fprintln(os.Stderr, "silo: unknown image operation provided")
+				usageAndExit()
+			}
+
+		}
+
 	default:
 		usageAndExit()
 	}

@@ -4,12 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
 const IMAGE_CATALOGUES_BASE_PATH = "res/silo-images/catalogues"
 const OFFICIAL_BASE_IMAGE_CATALOGUE_FILE_NAME = "silo-image-catalogue.json"
+const IMAGE_INSTALLATION_BASE_PATH = "res/silo-images"
+const IMAGE_INSTALLATION_BASE_PATH_ARM64 = IMAGE_INSTALLATION_BASE_PATH + "/arm64"
+const IMAGE_INSTALLATION_BASE_PATH_AMD64 = IMAGE_INSTALLATION_BASE_PATH + "/amd64"
 
 // CatalogueManager manages the silo image catalogues.
 type CatalogueManager struct {
@@ -116,6 +121,36 @@ func (cm *CatalogueManager) ListCatalogueImages(catalogueName string, archType A
 	return images, nil
 }
 
+// DownloadCatalogueImage downloads a specific Silo image from a given catalogue name, architecture type, and image name to a specified destination path.
+func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageId string) error {
+
+	if catalogueName == "" {
+		fmt.Println("silo: No catalogue image provided defaulting to the official base image catalogue: silo-base-image-catalogue")
+		catalogueName = "silo-base-image-catalogue"
+	}
+
+	catalogue, exists := cm.GetCatalogue(catalogueName)
+	if !exists {
+		return errors.New("catalogue not found: " + catalogueName)
+	}
+
+	archType, err := GetSystemArchType()
+	if err != nil {
+		return errors.New("failed to get system architecture type: " + err.Error())
+	}
+
+	image := catalogue.GetImageByID(archType, imageId)
+	if image == nil {
+		return errors.New("image not found: " + imageId + " for architecture: " + string(archType))
+	}
+
+	if err := cm.downloadAndUnpackCatalogueImage(image, archType); err != nil {
+		return errors.New("failed to download and unpack image: " + err.Error())
+	}
+	return nil
+
+}
+
 //helpers
 
 func (cm *CatalogueManager) loadCatalogueFromJSONFile(filePath string) (*SiloImageCatalogue, error) {
@@ -169,6 +204,92 @@ func (cm *CatalogueManager) loadAllCataloguesFromJSONFiles() error {
 		}
 		cm.catalogues[catalogue.Name] = catalogue
 
+	}
+
+	return nil
+}
+
+// downloadAndUnpackCatalogueImage downloads a specific Silo image from a given catalogue name, architecture type, and image name to a specified destination path.
+func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, archType ArchType) error {
+
+	
+	fmt.Println("Downloading Silo image:", image.Distro, image.Version, "for architecture:", archType, "standby this may take a few minutes depending on your internet connection...")
+	imageURL := image.ImageURL
+
+	//download the image from the URL
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	//check if the response status code is 200 OK
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download image: %s, status code: %d", imageURL, resp.StatusCode)
+	}
+
+	//create the destination path for the downloaded image
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	//prepare the destination path for the downloaded image based on its architecture type and name
+	var imageInstallationBasePath string
+	if archType == Arm64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
+	} else if archType == Amd64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
+	} else {
+		return fmt.Errorf("unsupported architecture type: %s", archType)
+	}
+	imageRootFolderName := image.Distro + "-" + image.Version + "--" + string(archType) + "-release"
+	destPath := filepath.Join(filepath.Dir(exe),
+		imageInstallationBasePath,
+		imageRootFolderName)
+
+	//create the destination directory if it doesn't exist
+	err = os.MkdirAll(destPath, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	//unpack the downloaded image to the destination path
+	err = extractBaseImage(resp, destPath)
+	if err != nil {
+		return fmt.Errorf("failed to unpack image: %w", err)
+	}
+
+	//finally write the checksum of the downloaded base image to the release directory for reference.
+	// under the file checksum.chk This will later be used by the SiloEngine to ensure exported Sessions
+	// can always be reconstructed with exactly the same base image that was used to create them, even if
+	// the base image is updated in the future.
+	checksumFilePath := filepath.Join(destPath, "checksum.chk")
+	err = os.WriteFile(checksumFilePath, []byte(image.ReleaseChecksum+"\n"), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write checksum to release directory: %w", err)
+	}
+
+	fmt.Println("Successfully downloaded and unpacked Silo image:", image.Distro, image.Version, "for architecture:", archType)
+
+	return nil
+
+}
+
+func extractBaseImage(resp *http.Response, destDir string) error {
+	defer resp.Body.Close()
+
+	cmd := exec.Command(
+		"tar",
+		"-xzf", "-",
+		"-C", destDir,
+	)
+
+	cmd.Stdin = resp.Body
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("extract base image: %w: %s", err, output)
 	}
 
 	return nil
