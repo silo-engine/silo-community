@@ -42,6 +42,16 @@ func (c *SiloImageCatalogue) GetImageByID(archType ArchType, id string) *SiloIma
 	return nil
 }
 
+func (c *SiloImageCatalogue) GetImageByDistroAndVersion(archType ArchType, distro string, version string) *SiloImage {
+	images := c.ListImages(archType)
+	for _, image := range images {
+		if image.Distro == distro && image.Version == version {
+			return &image
+		}
+	}
+	return nil
+}
+
 // SiloImage represents a single Silo image in the catalogue.
 type SiloImage struct {
 	Distro          string `json:"distro"`

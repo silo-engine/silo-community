@@ -98,12 +98,12 @@ func (scli *SiloCLI) Run() {
 				//}
 			case "pull":
 
-				//arg 2 should be the id of the image to pull, if not provided print usage and exit.
+				//arg 2 should be the id or name of the image to pull, if not provided print usage and exit.
 				if len(args) < 3 {
 					fmt.Fprintln(os.Stderr, "silo: no image name provided for pull operation")
 					usageAndExit()
 				}
-				imageId := args[2]
+				imageIdOrName := args[2]
 
 				//next search for the optional --catalogue flag and its value, if provided.
 				catalogueName := ""
@@ -114,7 +114,7 @@ func (scli *SiloCLI) Run() {
 					}
 				}
 
-				if err := scli.siloEngine.DownloadCatalogueImage(catalogueName, imageId); err != nil {
+				if err := scli.siloEngine.DownloadCatalogueImage(catalogueName, imageIdOrName); err != nil {
 					fatal(err)
 				}
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 const IMAGE_CATALOGUES_BASE_PATH = "res/silo-images/catalogues"
@@ -122,11 +123,15 @@ func (cm *CatalogueManager) ListCatalogueImages(catalogueName string, archType A
 }
 
 // DownloadCatalogueImage downloads a specific Silo image from a given catalogue name, architecture type, and image name to a specified destination path.
-func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageId string) error {
+func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageIdOrName string) error {
 
 	if catalogueName == "" {
 		fmt.Println("silo: No catalogue image provided defaulting to the official base image catalogue: silo-base-image-catalogue")
 		catalogueName = "silo-base-image-catalogue"
+	}
+
+	if imageIdOrName == "" {
+		return errors.New("no image id or name provided")
 	}
 
 	catalogue, exists := cm.GetCatalogue(catalogueName)
@@ -138,6 +143,25 @@ func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageId
 	if err != nil {
 		return errors.New("failed to get system architecture type: " + err.Error())
 	}
+
+	// Note: image ids are ALWAYS numeric and images names are are always alphanumeric with a hyphen in the middle,
+	// e.g. ubuntu-22.04 or debian-12.0 thus we may determine whether the user has specified an image id or an image name by
+	// either checking if the string is numeric or checking if the string contains a hyphen. We elect to check for the latter
+	// as its less likely to result in a false positive where a user decides to name an image with a numeric string,
+	// which is not recommended but possible.
+	if strings.Contains(imageIdOrName, "-") {
+		//imageIdOrName is an image name, so we will download the image by name.
+		return cm.downloadCatalogueImageByName(catalogue, archType, imageIdOrName)
+	} else {
+		//imageIdOrName is an image id, so we will download the image by id.
+		return cm.downloadCatalogueImageById(catalogue, archType, imageIdOrName)
+	}
+
+}
+
+//helpers
+
+func (cm *CatalogueManager) downloadCatalogueImageById(catalogue *SiloImageCatalogue, archType ArchType, imageId string) error {
 
 	image := catalogue.GetImageByID(archType, imageId)
 	if image == nil {
@@ -151,7 +175,30 @@ func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageId
 
 }
 
-//helpers
+// downloadCatalogueImageByName downloads a specific Silo image from a given catalogue name and image name.
+// the image name is merely a concatenation of the distro name and version number, e.g. "ubuntu-22.04" or "debian-12.0"
+// and is not unique across catalogues or architectures although silo will only ever download the image for the current
+//
+//	system architecture type, where available. If the catalogue or image does not exist, an error is returned.
+func (cm *CatalogueManager) downloadCatalogueImageByName(catalogue *SiloImageCatalogue, archType ArchType, imageName string) error {
+
+	imageNameParts := strings.SplitN(imageName, "-", 2)
+	if len(imageNameParts) != 2 {
+		return errors.New("invalid image name: " + imageName + " expected format: <distro>-<version> e.g. ubuntu-22.04 or debian-12.0")
+	}
+	distro := imageNameParts[0]
+	version := imageNameParts[1]
+	image := catalogue.GetImageByDistroAndVersion(archType, distro, version)
+	if image == nil {
+		return errors.New("image not found: " + imageName + " for architecture: " + string(archType))
+	}
+
+	if err := cm.downloadAndUnpackCatalogueImage(image, archType); err != nil {
+		return errors.New("failed to download and unpack image: " + err.Error())
+	}
+	return nil
+
+}
 
 func (cm *CatalogueManager) loadCatalogueFromJSONFile(filePath string) (*SiloImageCatalogue, error) {
 
@@ -212,8 +259,7 @@ func (cm *CatalogueManager) loadAllCataloguesFromJSONFiles() error {
 // downloadAndUnpackCatalogueImage downloads a specific Silo image from a given catalogue name, architecture type, and image name to a specified destination path.
 func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, archType ArchType) error {
 
-	
-	fmt.Println("Downloading Silo image:", image.Distro, image.Version, "for architecture:", archType, "standby this may take a few minutes depending on your internet connection...")
+	fmt.Println("\nDownloading Silo image:", image.Distro, image.Version, "for architecture:", archType, "standby this may take a few minutes depending on your internet connection...")
 	imageURL := image.ImageURL
 
 	//download the image from the URL
@@ -227,6 +273,7 @@ func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, ar
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to download image: %s, status code: %d", imageURL, resp.StatusCode)
 	}
+	
 
 	//create the destination path for the downloaded image
 	exe, err := os.Executable()

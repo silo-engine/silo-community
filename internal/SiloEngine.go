@@ -119,8 +119,8 @@ func (se *SiloEngine) DestroySession(sessionName string) error {
 //catalogue for the current system architecture. If the catalogue or image does not exist, 
 // an error is returned. Additionally if an empty catalogue name is provided, the default Silo base 
 // image catalogue will be used.
-func (se *SiloEngine) DownloadCatalogueImage(catalogueName string, imageId string) error {
-	return se.catalogueManager.DownloadCatalogueImage(catalogueName, imageId)
+func (se *SiloEngine) DownloadCatalogueImage(catalogueName string, imageIdOrName string) error {
+	return se.catalogueManager.DownloadCatalogueImage(catalogueName, imageIdOrName)
 }
 
 //Helpers....
