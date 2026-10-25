@@ -1,9 +1,12 @@
 package catalogue
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -273,7 +276,43 @@ func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, ar
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to download image: %s, status code: %d", imageURL, resp.StatusCode)
 	}
-	
+
+	tmp, err := os.CreateTemp("", "silo-image-*.tar.gz")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary image file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	//before going any further, where the image has been listed with a checksum, as all official
+	//Silo base images are, we will verify the checksum of the downloaded image against the
+	// expected checksum in the catalogue to ensure that the image has not been tampered with
+	// or corrupted during download.
+	if image.ReleaseChecksum != "" {
+		h := sha256.New()
+
+		if _, err := io.Copy(io.MultiWriter(tmp, h), resp.Body); err != nil {
+			return fmt.Errorf("failed to download image: %w", err)
+		}
+
+		checksum := hex.EncodeToString(h.Sum(nil))
+		if !strings.EqualFold(checksum, image.ReleaseChecksum) {
+			return fmt.Errorf(
+				"checksum mismatch: expected %s, got %s",
+				image.ReleaseChecksum, checksum,
+			)
+		} else {
+			fmt.Println("Successfully validated checksum of downloaded image:", image.Distro, image.Version, "for architecture:", archType)
+		}
+	} else {
+		if _, err := io.Copy(tmp, resp.Body); err != nil {
+			return fmt.Errorf("failed to download image: %w", err)
+		}
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to rewind temporary image: %w", err)
+	}
 
 	//create the destination path for the downloaded image
 	exe, err := os.Executable()
@@ -302,7 +341,7 @@ func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, ar
 	}
 
 	//unpack the downloaded image to the destination path
-	err = extractBaseImage(resp, destPath)
+	err = extractBaseImage(tmp, destPath)
 	if err != nil {
 		return fmt.Errorf("failed to unpack image: %w", err)
 	}
@@ -323,16 +362,14 @@ func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, ar
 
 }
 
-func extractBaseImage(resp *http.Response, destDir string) error {
-	defer resp.Body.Close()
-
+func extractBaseImage(src io.Reader, destDir string) error {
 	cmd := exec.Command(
 		"tar",
 		"-xzf", "-",
 		"-C", destDir,
 	)
 
-	cmd.Stdin = resp.Body
+	cmd.Stdin = src
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
