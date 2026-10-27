@@ -19,6 +19,7 @@ import (
 // of Silo sessions.
 type SiloEngine struct {
 	catalogueManager        *catalogue.CatalogueManager
+	sessionManager          *session.SessionManager
 	overlayManager          *filesystem.OverlayManager
 	processNamespaceManager *namespace.ProcessNamespaceManager
 	mountNamespaceManager   *namespace.MountNamespaceManager
@@ -26,14 +27,17 @@ type SiloEngine struct {
 }
 
 func NewSiloEngine() *SiloEngine {
+
 	catalogueManager := catalogue.NewCatalogueManager()
-	overlayManager := filesystem.NewOverlayManager(catalogueManager)
+	sessionManager := session.NewSessionManager(catalogueManager)
+	overlayManager := filesystem.NewOverlayManager()
 	processNamespaceManager := namespace.NewProcessNamespaceManager()
 	mountNamespaceManager := namespace.NewMountNamespaceManager()
 	shellManager := shell.NewShellManager(processNamespaceManager)
 
 	return &SiloEngine{
 		catalogueManager:        catalogueManager,
+		sessionManager:          sessionManager,
 		overlayManager:          overlayManager,
 		processNamespaceManager: processNamespaceManager,
 		mountNamespaceManager:   mountNamespaceManager,
@@ -43,12 +47,12 @@ func NewSiloEngine() *SiloEngine {
 
 // StartTransientSession creates and enters a new transient Silo session, which is an isolated environment
 // that does not persist any changes made during its lifecycle; any and all changes made within the session
-// are discarded upon exit.
-func (se *SiloEngine) StartTransientSession() error {
+// are discarded upon exit. Opts may be used to pass in the installed image to run in the session.
+func (se *SiloEngine) StartTransientSession(opts *SiloEngineOpts) error {
 
 	//create a new transient session and defer its cleanup to ensure that resources are
 	// released when the shell exits.
-	s, err := session.NewTransient()
+	s, err := se.sessionManager.NewTransient(opts.SessionBaseImageIdOrName)
 	if err != nil {
 		return err
 	}
@@ -65,14 +69,14 @@ func (se *SiloEngine) StartPersistentSession(sessionName string) error {
 
 	//loads session with the provided name and defer cleanup to ensure that
 	// resources are released when the shell exits.
-	s, err := session.Load(sessionName)
+	s, err := se.sessionManager.Load(sessionName)
 	if err != nil {
 		return errors.New("An error occurred whislt attempting to enter existing Silo Session: " + err.Error())
 	}
 	defer s.Cleanup()
 
 	// Acquire lock on the session and defer its release.
-	lock, err := session.AcquireSessionLock(sessionName)
+	lock, err := se.sessionManager.AcquireSessionLock(sessionName)
 	if err != nil {
 		return errors.New("An error occurred whilst attempting to acquire a lock on the Silo Session: " + err.Error())
 	}
@@ -85,11 +89,12 @@ func (se *SiloEngine) StartPersistentSession(sessionName string) error {
 
 // CreateSession creates a new persistent Silo session with the specified name. The resulting session
 // can then be started using the StartPersistentSession method. If a session with the specified name already exists,
-// an error is returned, every session name musr be unique.
-func (se *SiloEngine) CreateSession(sessionName string) (*session.Session, error) {
+// an error is returned, every session name musr be unique. Opts may be used to associate a
+// specific base image with the session.
+func (se *SiloEngine) CreateSession(sessionName string, opts *SiloEngineOpts) (*session.SiloSession, error) {
 
 	//create a new persistent session with the provided name.
-	s, err := session.Create(sessionName)
+	s, err := se.sessionManager.NewPersistent(sessionName, opts.SessionBaseImageIdOrName)
 	if err != nil {
 		return nil, errors.New("An error occurred whilst attempting to create a new Silo Session: " + err.Error())
 	}
@@ -102,22 +107,22 @@ func (se *SiloEngine) DestroySession(sessionName string) error {
 
 	//obtain a lock on the session to ensure that it is not in use by another process
 	// before destroying it.
-	lock, err := session.AcquireSessionLock(sessionName)
+	lock, err := se.sessionManager.AcquireSessionLock(sessionName)
 	if err != nil {
 		return errors.New("An error occurred whilst attempting to acquire a lock on the Silo Session: " + err.Error() + " please ensure that the session is is not in use by any processes before attempting to destroy it.")
 	}
 	defer lock.Unlock()
 
 	//destroy the persistent session with the provided name.
-	if err := session.Destroy(sessionName); err != nil {
+	if err := se.sessionManager.Destroy(sessionName); err != nil {
 		return errors.New("An error occurred whilst attempting to destroy the Silo Session: " + err.Error())
 	}
 	return nil
 }
 
-//DownloadCatalogueImage downloads a specific Silo image by id where it exists in the specified
-//catalogue for the current system architecture. If the catalogue or image does not exist, 
-// an error is returned. Additionally if an empty catalogue name is provided, the default Silo base 
+// DownloadCatalogueImage downloads a specific Silo image by id where it exists in the specified
+// catalogue for the current system architecture. If the catalogue or image does not exist,
+// an error is returned. Additionally if an empty catalogue name is provided, the default Silo base
 // image catalogue will be used.
 func (se *SiloEngine) DownloadCatalogueImage(catalogueName string, imageIdOrName string) error {
 	return se.catalogueManager.DownloadCatalogueImage(catalogueName, imageIdOrName)
@@ -126,7 +131,7 @@ func (se *SiloEngine) DownloadCatalogueImage(catalogueName string, imageIdOrName
 //Helpers....
 
 // startSession is a helper method that encapsulates the common logic for starting both transient and persistent Silo sessions.
-func (se *SiloEngine) startSession(s *session.Session) error {
+func (se *SiloEngine) startSession(s *session.SiloSession) error {
 	cleanup := func() {
 		se.overlayManager.TeardownOverlay(s)
 		if s != nil && s.Transient {

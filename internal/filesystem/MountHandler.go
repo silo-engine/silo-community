@@ -72,7 +72,6 @@ func (m *MountHandler) Apply(root string) error {
 	}{
 		{src: "/etc/resolv.conf", dst: filepath.Join(root, "etc", "resolv.conf")},
 		{src: "/etc/hosts", dst: filepath.Join(root, "etc", "hosts")},
-		{src: "/etc/ssl/certs", dst: filepath.Join(root, "etc", "ssl", "certs")},
 	} {
 		if err := bindIfExists(pair.src, pair.dst); err != nil {
 			return err
@@ -95,7 +94,6 @@ func (m *MountHandler) Cleanup(root string) {
 	for _, dst := range []string{
 		filepath.Join(root, "etc", "resolv.conf"),
 		filepath.Join(root, "etc", "hosts"),
-		filepath.Join(root, "etc", "ssl", "certs"),
 	} {
 		unmountIfMounted(dst)
 	}

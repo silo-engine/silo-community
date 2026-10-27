@@ -60,6 +60,24 @@ type SiloImage struct {
 	ReleaseChecksum string `json:"release_checksum"`
 	Description     string `json:"description"`
 	ImageURL        string `json:"image_url"`
+	installed       bool
+	archString      string
+}
+
+func (i *SiloImage) IsInstalled() bool {
+	return i.installed
+}
+
+func (i *SiloImage) SetInstalled(installed bool) {
+	i.installed = installed
+}
+
+func (i *SiloImage) GetArchString() string {
+	return i.archString
+}
+
+func (i *SiloImage) SetArchString(archString string) {
+	i.archString = archString
 }
 
 // SiloImages represents a collection of Silo images for different architectures.

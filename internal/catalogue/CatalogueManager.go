@@ -24,7 +24,8 @@ const IMAGE_INSTALLATION_BASE_PATH_AMD64 = IMAGE_INSTALLATION_BASE_PATH + "/amd6
 type CatalogueManager struct {
 
 	// catalogues is a map of catalogues, keyed by their name.
-	catalogues map[string]*SiloImageCatalogue
+	catalogues     map[string]*SiloImageCatalogue
+	systemArchType ArchType
 }
 
 // NewCatalogueManager creates a new CatalogueManager.
@@ -42,6 +43,22 @@ func NewCatalogueManager() *CatalogueManager {
 		panic(e)
 	}
 
+	//set the system CPU architecture type, this will be used to determine which images apply to the current system
+	//currently only arm64 and amd64 are supported, but this may be extended in the future to support other architectures.
+	archType, err := GetSystemArchType()
+	if err != nil {
+		e := errors.New("failed to get system architecture type: " + err.Error())
+		panic(e)
+	}
+
+	//check that the system architecture type is supported, if not panic as this is a fatal error.
+	if archType != Arm64 && archType != Amd64 {
+		e := errors.New("unsupported system architecture type: " + string(archType) + " only arm64 and amd64 are supported")
+		panic(e)
+	}
+
+	cat.systemArchType = archType
+
 	return cat
 }
 
@@ -51,15 +68,16 @@ func (cm *CatalogueManager) GetBaseImageCatalogue() (*SiloImageCatalogue, bool) 
 }
 
 // GetBaseImageCatalogueDefaultImage retrieves the default Silo image for the official base image catalogue for a given architecture type.
-func (cm *CatalogueManager) GetBaseImageCatalogueDefaultImage(archType ArchType) (*SiloImage, error) {
+func (cm *CatalogueManager) GetBaseImageCatalogueDefaultImage() (*SiloImage, error) {
 	catalogue, exists := cm.GetBaseImageCatalogue()
 	if !exists {
 		return nil, errors.New("base image catalogue not found")
 	}
 
-	defaultImage := catalogue.GetDefaultImage(archType)
+	defaultImage := catalogue.GetDefaultImage(cm.systemArchType)
+	defaultImage.SetArchString(string(cm.systemArchType))
 	if defaultImage == nil {
-		return nil, errors.New("default image not found for architecture: " + string(archType))
+		return nil, errors.New("default image not found for architecture: " + string(cm.systemArchType))
 	}
 
 	return defaultImage, nil
@@ -84,6 +102,34 @@ func (cm *CatalogueManager) ListBaseImageCatalogueImages(archType ArchType) ([]S
 func (cm *CatalogueManager) GetCatalogue(name string) (*SiloImageCatalogue, bool) {
 	catalogue, exists := cm.catalogues[name]
 	return catalogue, exists
+}
+
+func (cm *CatalogueManager) GetCatalogueImage(imageNameOrId string) (*SiloImage, bool) {
+
+	if imageNameOrId == "" {
+		return nil, false
+	}
+
+	for _, catalogue := range cm.catalogues {
+		if imageReferencedByName(imageNameOrId) {
+			//where image is specified by name split the name into its distro and version parts and search for the image by those values.
+			imageNameOrIdParts := strings.SplitN(imageNameOrId, "-", 2)
+			distro := imageNameOrIdParts[0]
+			version := imageNameOrIdParts[1]
+			if image := catalogue.GetImageByDistroAndVersion(cm.systemArchType, distro, version); image != nil {
+				image.SetArchString(string(cm.systemArchType))
+				return image, true
+			}
+		} else {
+			//otherwise search for the image by its id, which is always numeric and unique across catalogues and architectures.
+			if image := catalogue.GetImageByID(cm.systemArchType, imageNameOrId); image != nil {
+				image.SetArchString(string(cm.systemArchType))
+				return image, true
+			}
+		}
+	}
+
+	return nil, false
 }
 
 // List all catalogue by their name (i.e in the name field in the JSON file, which is also the key we use to retrieve it from the map).
@@ -152,7 +198,7 @@ func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageId
 	// either checking if the string is numeric or checking if the string contains a hyphen. We elect to check for the latter
 	// as its less likely to result in a false positive where a user decides to name an image with a numeric string,
 	// which is not recommended but possible.
-	if strings.Contains(imageIdOrName, "-") {
+	if imageReferencedByName(imageIdOrName) {
 		//imageIdOrName is an image name, so we will download the image by name.
 		return cm.downloadCatalogueImageByName(catalogue, archType, imageIdOrName)
 	} else {
@@ -254,9 +300,64 @@ func (cm *CatalogueManager) loadAllCataloguesFromJSONFiles() error {
 		}
 		cm.catalogues[catalogue.Name] = catalogue
 
+		//mark any images that are already installed on the system as installed in the catalogue
+		cm.markInstalledImages(catalogue)
+
+		//set the architecture string for each image in the catalogue, this is used to display the architecture type in the UI.
+		cm.setSiloImageArchString(catalogue)
+
 	}
 
 	return nil
+}
+
+// markInstalledImages checks if any images in the given catalogue are already installed on the system and marks them as installed in the catalogue.
+func (cm *CatalogueManager) markInstalledImages(catalogue *SiloImageCatalogue) {
+	for _, image := range catalogue.SiloImages.Arm64 {
+		if cm.isImageInstalled(Arm64, &image) {
+			image.SetInstalled(true)
+		}
+	}
+	for _, image := range catalogue.SiloImages.Amd64 {
+		if cm.isImageInstalled(Amd64, &image) {
+			image.SetInstalled(true)
+		}
+	}
+}
+
+// SetSiloImageArchString sets the architecture string for each Silo image in the given catalogue
+// based on its architecture type. This value is not persisted to disk.
+func (cm *CatalogueManager) setSiloImageArchString(catalogue *SiloImageCatalogue) {
+	for _, image := range catalogue.SiloImages.Arm64 {
+		image.SetArchString("arm64")
+	}
+	for _, image := range catalogue.SiloImages.Amd64 {
+		image.SetArchString("amd64")
+	}
+}
+
+// isImageInstalled checks if a specific Silo image is currently installed by looking for
+// the image's root folder in the IMAGE_INSTALLATION_BASE_PATH directory for the given architecture type.
+func (cm *CatalogueManager) isImageInstalled(archType ArchType, image *SiloImage) bool {
+
+	var imageInstallationBasePath string
+	if archType == Arm64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
+	} else if archType == Amd64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
+	} else {
+		return false
+	}
+
+	// build path to what the image's root release package folder would be, if it were installed, and check if it exists...
+	// If it does, the image is considered installed.
+	imageRootFolderName := image.Distro + "-" + image.Version + "--" + string(archType) + "-release"
+	destPath := filepath.Join(imageInstallationBasePath, imageRootFolderName)
+	if _, err := os.Stat(destPath); err == nil {
+		return true
+	}
+
+	return false
 }
 
 // downloadAndUnpackCatalogueImage downloads a specific Silo image from a given catalogue name, architecture type, and image name to a specified destination path.
@@ -356,6 +457,9 @@ func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, ar
 		return fmt.Errorf("failed to write checksum to release directory: %w", err)
 	}
 
+	//mark the image as installed in the (in memory catalogue
+	image.SetInstalled(true)
+
 	fmt.Println("Successfully downloaded and unpacked Silo image:", image.Distro, image.Version, "for architecture:", archType)
 
 	return nil
@@ -377,4 +481,13 @@ func extractBaseImage(src io.Reader, destDir string) error {
 	}
 
 	return nil
+}
+
+func imageReferencedByName(imageNameOrId string) bool {
+	//check if the imageNameOrId is a valid image name (i.e. contains a hyphen)
+	if strings.Contains(imageNameOrId, "-") {
+		return true
+	}
+
+	return false
 }

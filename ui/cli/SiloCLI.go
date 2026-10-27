@@ -36,41 +36,104 @@ func (scli *SiloCLI) Run() {
 
 	switch args[0] {
 	case "create":
-		if len(args) != 2 {
+		if len(args) < 2 {
 			usageAndExit()
 		}
 
-		s, err := scli.siloEngine.CreateSession(args[1])
+		//mandatory
+		var sessionName string = args[1]
+		if sessionName == "" {
+			fmt.Fprintln(os.Stderr, "silo: session name cannot be empty")
+			usageAndExit()
+		}
+
+		//optional
+		var userSpecifiedImage string = "" //may either be specified as an image name or id.
+
+		//attempt to find optional command flags vals
+		for i, arg := range args {
+			if arg == "--image" && i+1 < len(args) {
+				userSpecifiedImage = args[i+1]
+			}
+		}
+
+		//capture any user specified image to use for the transient session, if provided.
+		siloengineOpts := internal.NewSiloEngineOpts()
+		siloengineOpts.SessionBaseImageIdOrName = userSpecifiedImage
+
+		s, err := scli.siloEngine.CreateSession(sessionName, siloengineOpts)
 		if err != nil {
 			fatal(err)
 		}
 		fmt.Printf("Created Silo session/environment %q\n", s.Name)
 	case "enter":
 
-		//if no values was provided with create start a transient session, otherwise start a
-		// persistent session with the provided name.
-		if len(args) == 1 {
-			fmt.Fprintln(os.Stderr, "silo: no session name provided, entering a transient session..")
-			if err := scli.siloEngine.StartTransientSession(); err != nil {
-				fatal(err)
+		//mandatory
+		var isTransient bool = false
+
+		//optionals..
+		var sessionName string = ""
+		var createSession bool = false
+		var userSpecifiedImage string = "" //may either be specified as an image name or id.
+
+		///set mandatory vals
+		if len(args) == 1 || (len(args) >= 2 && args[1] == "--image") {
+			isTransient = true
+		} else if len(args) >= 2 && len(args[1]) > 0 {
+			isTransient = false
+			sessionName = args[1]
+		} else {
+			usageAndExit()
+		}
+
+		//attempt to find optional command flags vals
+		for i, arg := range args {
+			if arg == "--create" {
+				createSession = true
 			}
-		} else if len(args) == 2 {
-			fmt.Fprintln(os.Stderr, "silo: entering session: ", args[1])
-			if err := scli.siloEngine.StartPersistentSession(args[1]); err != nil {
-				fatal(err)
+			if arg == "--image" && i+1 < len(args) {
+				userSpecifiedImage = args[i+1]
 			}
-		} else if len(args) == 3 && args[2] == "--create" {
-			fmt.Fprintln(os.Stderr, "silo: creating and entering session: ", args[1])
-			if _, err := scli.siloEngine.CreateSession(args[1]); err != nil {
-				fatal(err)
-			}
-			if err := scli.siloEngine.StartPersistentSession(args[1]); err != nil {
+
+		}
+
+		// start the appropriate session based on the provided arguments and flags.
+		if isTransient {
+
+			fmt.Fprintln(os.Stderr, "silo: entering transient session: ", sessionName)
+
+			//capture any user specified image to use for the transient session, if provided.
+			siloengineOpts := internal.NewSiloEngineOpts()
+			siloengineOpts.SessionBaseImageIdOrName = userSpecifiedImage
+
+			//start a new transient session.
+			if err := scli.siloEngine.StartTransientSession(siloengineOpts); err != nil {
 				fatal(err)
 			}
 
 		} else {
-			usageAndExit()
+
+			if createSession {
+				fmt.Fprintln(os.Stderr, "silo: creating session: ", sessionName)
+
+				//capture any user specified image to use for the new persistent session, if provided.
+				siloengineOpts := internal.NewSiloEngineOpts()
+				siloengineOpts.SessionBaseImageIdOrName = userSpecifiedImage
+
+				//create a new persistent session with the provided name.
+				if _, err := scli.siloEngine.CreateSession(sessionName, siloengineOpts); err != nil {
+					fatal(err)
+				}
+			}
+
+			//enter the specified persistent session.
+			fmt.Fprintln(os.Stderr, "silo: entering persistent session: ", sessionName)
+
+			if err := scli.siloEngine.StartPersistentSession(sessionName); err != nil {
+				fatal(err)
+			}
 		}
+
 	case "destroy":
 		if len(args) != 2 {
 			usageAndExit()
@@ -103,17 +166,32 @@ func (scli *SiloCLI) Run() {
 					fmt.Fprintln(os.Stderr, "silo: no image name provided for pull operation")
 					usageAndExit()
 				}
-				imageIdOrName := args[2]
+				imageIdOrName := args[2] //we ONLY fallback to this if an explicit --id or --name flag has not been specified.
+				imageId := ""
+				imageName := ""
 
 				//next search for the optional --catalogue flag and its value, if provided.
 				catalogueName := ""
 				for i, arg := range args {
 					if arg == "--catalogue" && i+1 < len(args) {
 						catalogueName = args[i+1]
-						break
+					}
+					if arg == "--id" && i+1 < len(args) {
+						imageId = args[i+1]
+					}
+					if arg == "--name" && i+1 < len(args) {
+						imageName = args[i+1]
 					}
 				}
 
+				//if an explicit --id or --name flag has been provided, use that value instead of the positional argument.
+				if imageId != "" {
+					imageIdOrName = imageId
+				} else if imageName != "" {
+					imageIdOrName = imageName
+				}
+
+				//call the silo engine to download the specified image from the specified catalogue.
 				if err := scli.siloEngine.DownloadCatalogueImage(catalogueName, imageIdOrName); err != nil {
 					fatal(err)
 				}

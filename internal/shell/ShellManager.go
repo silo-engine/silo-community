@@ -1,4 +1,4 @@
- //go:build linux
+//go:build linux
 
 package shell
 
@@ -17,7 +17,7 @@ import (
 // ShellManager manages the launching of an interactive shell within a Silo session.
 type ShellManager struct {
 	processNamespaceManager *namespace.ProcessNamespaceManager
-	mountNamespaceManager *namespace.MountNamespaceManager
+	mountNamespaceManager   *namespace.MountNamespaceManager
 }
 
 // NewShellManager creates a new instance of ShellManager with the given ProcessNamespaceManager.
@@ -26,11 +26,10 @@ func NewShellManager(
 ) *ShellManager {
 	return &ShellManager{
 		processNamespaceManager: processNamespaceManager,
-	
 	}
 }
 
-func (m *ShellManager) RunShell(s *session.Session) error {
+func (m *ShellManager) RunShell(s *session.SiloSession) error {
 	promptName := s.Name
 
 	if s.Transient {
