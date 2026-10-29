@@ -2,12 +2,12 @@ package catalogue
 
 // SiloImageCatalogue represents a catalogue of Silo images.
 type SiloImageCatalogue struct {
-	Version           string     `json:"version"`
-	Name              string     `json:"name"`
-	Description       string     `json:"description"`
-	DefaultArm64Image *SiloImage `json:"defaultArm64Image,omitempty"` //only applies to the official base image catalogue, which is expected to be named "silo-base-image-catalogue"
-	DefaultAmd64Image *SiloImage `json:"defaultAmd64Image,omitempty"` //only applies to the official base image catalogue, which is expected to be named "silo-base-image-catalogue"
-	SiloImages        SiloImages `json:"silo-images"`
+	Version           string      `json:"version"`
+	Name              string      `json:"name"`
+	Description       string      `json:"description"`
+	DefaultArm64Image *SiloImage  `json:"defaultArm64Image,omitempty"` //only applies to the official base image catalogue, which is expected to be named "silo-base-image-catalogue"
+	DefaultAmd64Image *SiloImage  `json:"defaultAmd64Image,omitempty"` //only applies to the official base image catalogue, which is expected to be named "silo-base-image-catalogue"
+	SiloImages        *SiloImages `json:"silo-images"`
 }
 
 func (c *SiloImageCatalogue) GetDefaultImage(archType ArchType) *SiloImage {
@@ -21,7 +21,7 @@ func (c *SiloImageCatalogue) GetDefaultImage(archType ArchType) *SiloImage {
 	}
 }
 
-func (c *SiloImageCatalogue) ListImages(archType ArchType) []SiloImage {
+func (c *SiloImageCatalogue) ListImages(archType ArchType) []*SiloImage {
 	switch archType {
 	case Arm64:
 		return c.SiloImages.Arm64
@@ -36,7 +36,7 @@ func (c *SiloImageCatalogue) GetImageByID(archType ArchType, id string) *SiloIma
 	images := c.ListImages(archType)
 	for _, image := range images {
 		if image.ReleaseVersion == id {
-			return &image
+			return image
 		}
 	}
 	return nil
@@ -46,7 +46,7 @@ func (c *SiloImageCatalogue) GetImageByDistroAndVersion(archType ArchType, distr
 	images := c.ListImages(archType)
 	for _, image := range images {
 		if image.Distro == distro && image.Version == version {
-			return &image
+			return image
 		}
 	}
 	return nil
@@ -82,6 +82,6 @@ func (i *SiloImage) SetArchString(archString string) {
 
 // SiloImages represents a collection of Silo images for different architectures.
 type SiloImages struct {
-	Arm64 []SiloImage `json:"arm64"`
-	Amd64 []SiloImage `json:"amd64"`
+	Arm64 []*SiloImage `json:"arm64"`
+	Amd64 []*SiloImage `json:"amd64"`
 }

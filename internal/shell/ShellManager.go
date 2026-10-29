@@ -41,7 +41,7 @@ func (m *ShellManager) RunShell(s *session.SiloSession) error {
 	}
 
 	// Clear the terminal to ensure a clean display of the prompt.
-	fmt.Print("\033[H\033[2J")
+	//fmt.Print("\033[H\033[2J")
 
 	// Prepare the bootstrap script that sets up the shell environment and executes the shell.
 	bootstrap := fmt.Sprintf(

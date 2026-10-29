@@ -59,6 +59,9 @@ func NewCatalogueManager() *CatalogueManager {
 
 	cat.systemArchType = archType
 
+	img, _ := cat.GetCatalogueImage("ubuntu-25.04")
+	fmt.Println(img.IsInstalled())
+
 	return cat
 }
 
@@ -84,15 +87,15 @@ func (cm *CatalogueManager) GetBaseImageCatalogueDefaultImage() (*SiloImage, err
 }
 
 // List BaseImageCatalogueImages lists all Silo images for the official base image catalogue for a given architecture type.
-func (cm *CatalogueManager) ListBaseImageCatalogueImages(archType ArchType) ([]SiloImage, error) {
+func (cm *CatalogueManager) ListBaseImageCatalogueImages() ([]*SiloImage, error) {
 	catalogue, exists := cm.GetBaseImageCatalogue()
 	if !exists {
 		return nil, errors.New("base image catalogue not found")
 	}
 
-	images := catalogue.ListImages(archType)
+	images := catalogue.ListImages(cm.systemArchType)
 	if images == nil {
-		return nil, errors.New("no images found for architecture: " + string(archType))
+		return nil, errors.New("no images found for architecture: " + string(cm.systemArchType))
 	}
 
 	return images, nil
@@ -157,15 +160,15 @@ func (cm *CatalogueManager) ListCatalogues() []*SiloImageCatalogue {
 }
 
 // ListCatalogueIMages lists all Silo images for a given catalogue name and architecture type.
-func (cm *CatalogueManager) ListCatalogueImages(catalogueName string, archType ArchType) ([]SiloImage, error) {
+func (cm *CatalogueManager) ListCatalogueImages(catalogueName string) ([]*SiloImage, error) {
 	catalogue, exists := cm.GetCatalogue(catalogueName)
 	if !exists {
 		return nil, errors.New("catalogue not found: " + catalogueName)
 	}
 
-	images := catalogue.ListImages(archType)
+	images := catalogue.ListImages(cm.systemArchType)
 	if images == nil {
-		return nil, errors.New("no images found for architecture: " + string(archType))
+		return nil, errors.New("no images found for architecture: " + string(cm.systemArchType))
 	}
 
 	return images, nil
@@ -314,12 +317,12 @@ func (cm *CatalogueManager) loadAllCataloguesFromJSONFiles() error {
 // markInstalledImages checks if any images in the given catalogue are already installed on the system and marks them as installed in the catalogue.
 func (cm *CatalogueManager) markInstalledImages(catalogue *SiloImageCatalogue) {
 	for _, image := range catalogue.SiloImages.Arm64 {
-		if cm.isImageInstalled(Arm64, &image) {
+		if cm.isImageInstalled(Arm64, image) {
 			image.SetInstalled(true)
 		}
 	}
 	for _, image := range catalogue.SiloImages.Amd64 {
-		if cm.isImageInstalled(Amd64, &image) {
+		if cm.isImageInstalled(Amd64, image) {
 			image.SetInstalled(true)
 		}
 	}
