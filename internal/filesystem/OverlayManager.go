@@ -64,7 +64,8 @@ func (m *OverlayManager) SetupOverlay(session *session.SiloSession) error {
 	}
 
 	options := fmt.Sprintf(
-		"lowerdir=%s,upperdir=%s,workdir=%s",
+		//"lowerdir=%s,upperdir=%s,workdir=%s",
+		"lowerdir=%s,upperdir=%s,workdir=%s,metacopy=off,index=off,redirect_dir=nofollow",
 		lower,
 		session.Upper,
 		session.Work,

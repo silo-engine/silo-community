@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/silo-engine/silo-community/internal"
 )
@@ -42,7 +43,7 @@ func (scli *SiloCLI) Run() {
 
 		//mandatory
 		var sessionName string = args[1]
-		if sessionName == "" {
+		if sessionName == "" || strings.HasPrefix(sessionName, "--") {
 			fmt.Fprintln(os.Stderr, "silo: session name cannot be empty")
 			usageAndExit()
 		}
