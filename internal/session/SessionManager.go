@@ -189,15 +189,22 @@ func (sm *SessionManager) newSession(
 			return nil, fmt.Errorf("failed to retrieve default image for the current system architecture: %w", error)
 		}
 
+		//as the default image struct contains partial info about the image, i.e. excluding release checksum we use
+		//the "release version" of the default image to find the full image details in the catalogue and associate it with the session.
+		image, found := sm.catalogueManager.GetCatalogueImage(defaultImage.ReleaseVersion)
+		if !found {
+			return nil, fmt.Errorf("failed to find default image %q in the catalogue", defaultImage.ReleaseVersion)
+		}
+
 		//create and populate the relevant field in the sessions Metadata struct with the default image details.
 		baseImageMetaData := NewBaseImageMetadata(
-			defaultImage.Distro,
-			defaultImage.Version,
-			defaultImage.ReleaseVersion,
-			defaultImage.ReleaseChecksum,
-			defaultImage.Description,
-			defaultImage.ImageURL,
-			defaultImage.GetArchString(),
+			image.Distro,
+			image.Version,
+			image.ReleaseVersion,
+			image.ReleaseChecksum,
+			image.Description,
+			image.ImageURL,
+			image.GetArchString(),
 		)
 
 		// populate the session's metadata with the base image details.
@@ -225,7 +232,7 @@ func (s *SiloSession) Cleanup() {
 		return
 	}
 
-	fmt.Printf("Cleaning up transient Silo session %q\n", s.Root)
+	//fmt.Printf("Cleaning up transient Silo session %q\n", s.Root)
 	_ = os.RemoveAll(s.Root)
 }
 

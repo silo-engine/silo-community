@@ -40,6 +40,10 @@ func (m *ShellManager) RunShell(s *session.SiloSession) error {
 		promptName = "unnamed"
 	}
 
+	// Clear the terminal to ensure a clean display of the prompt.
+	fmt.Print("\033[H\033[2J")
+
+	// Prepare the bootstrap script that sets up the shell environment and executes the shell.
 	bootstrap := fmt.Sprintf(
 		"export PS1=%s; mount -t proc proc /proc && exec /bin/bash --noprofile --norc -i",
 		shellQuote("\\[\\e[92m\\]silo#"+promptName+"> \\[\\e[0m\\] "),

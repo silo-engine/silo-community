@@ -173,7 +173,7 @@ func (se *SiloEngine) startSession(s *session.SiloSession) error {
 	// running in a new PID namespace, so it will see itself as PID 1 and can
 	// manage its own processes independently of the host system.
 	if err := se.shellManager.RunShell(s); err != nil {
-		fmt.Fprintf(os.Stderr, "SILO: An error occurred whilst running the Silo shell: %v\n", err)
+		fmt.Fprintf(os.Stderr, "SILO: exited %v\n", err)
 	}
 
 	return nil
