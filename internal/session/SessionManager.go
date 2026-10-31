@@ -67,6 +67,8 @@ func (sm *SessionManager) NewPersistent(name string, imageidOrName string) (*Sil
 	// to dispose of the session and clean up its resources when it is no longer needed.
 	sess, err := sm.newSession(root, false, name, true, imageidOrName)
 	if err != nil {
+		//cleanup the environment directory if session creation fails.
+		_ = os.RemoveAll(root)
 		return nil, fmt.Errorf("create persistent session: %w", err)
 	}
 
@@ -212,8 +214,9 @@ func (sm *SessionManager) newSession(
 	}
 
 	// next ensure that the base image release directory exists for the specified base image,
+	imageNameVersionAndArch := s.Metadata.BaseImage.Distro + "-" + s.Metadata.BaseImage.Version + "--" + s.Metadata.BaseImage.ArchString
 	imageNameAndVersion := s.Metadata.BaseImage.Distro + "-" + s.Metadata.BaseImage.Version
-	if !sm.baseImageReleaseDirExists(imageNameAndVersion, s.Metadata.BaseImage.ArchString) {
+	if !sm.baseImageReleaseDirExists(imageNameVersionAndArch, s.Metadata.BaseImage.ArchString) {
 		return nil, fmt.Errorf("The specified base image: %q exists in the catalogue, but DOES NOT appear to have been installed. You can install it using: \n 'silo images pull --name %s' ", imageNameAndVersion, imageNameAndVersion)
 	}
 
