@@ -160,6 +160,37 @@ func (scli *SiloCLI) Run() {
 				//if err := scli.siloEngine.UpdateBaseImages(); err != nil {
 				//	fatal(err)
 				//}
+			case "rm":
+				//we expect argd[2] to be the id or name of the image to remove, if not provided print usage and exit.
+				if len(args) < 3 {
+					fmt.Fprintln(os.Stderr, "silo: no image name provided for remove operation")
+					usageAndExit()
+				}
+				imageIdOrName := args[2] //we ONLY fallback to this if an explicit --id or --name flag has not been specified.
+				imageId := ""
+				imageName := ""
+
+				//next search for the optional --id or --name flags and their values, if provided.
+				for i, arg := range args {
+					if arg == "--id" && i+1 < len(args) {
+						imageId = args[i+1]
+					}
+					if arg == "--name" && i+1 < len(args) {
+						imageName = args[i+1]
+					}
+				}
+
+				//if an explicit --id or --name flag has been provided, use that value instead of the positional argument.
+				if imageId != "" {
+					imageIdOrName = imageId
+				} else if imageName != "" {
+					imageIdOrName = imageName
+				}
+
+				//call the silo engine to remove the specified image from the local system.
+				if err := scli.siloEngine.RemoveInstalledImage(imageIdOrName); err != nil {
+					fatal(err)
+				}
 			case "pull":
 
 				//arg 2 should be the id or name of the image to pull, if not provided print usage and exit.

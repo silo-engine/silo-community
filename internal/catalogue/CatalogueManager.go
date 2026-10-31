@@ -59,9 +59,6 @@ func NewCatalogueManager() *CatalogueManager {
 
 	cat.systemArchType = archType
 
-	img, _ := cat.GetCatalogueImage("ubuntu-25.04")
-	fmt.Println(img.IsInstalled())
-
 	return cat
 }
 
@@ -172,6 +169,73 @@ func (cm *CatalogueManager) ListCatalogueImages(catalogueName string) ([]*SiloIm
 	}
 
 	return images, nil
+}
+
+// RemoveInstalledImage removes an installed Silo image from the system by deleting its root release package folder in the IMAGE_INSTALLATION_BASE_PATH directory for the given architecture type.
+// If the image is not installed, an error is returned.
+func (cm *CatalogueManager) RemoveInstalledImage(imageNameOrId string) error {
+
+	if imageNameOrId == "" {
+		return errors.New("no image name or id provided")
+	}
+
+	var imgName string
+	if !imageReferencedByName(imageNameOrId) {
+		//if the image is NOT referenced by name we must first lookup its name in the catalogue by
+		//id as the root release package folder is named according to the image name and version, not its id.
+		image, exists := cm.GetCatalogueImage(imageNameOrId)
+		if !exists {
+			return errors.New("image not found: " + imageNameOrId)
+		}
+		imgName = image.Distro + "-" + image.Version
+	} else {
+		//build release directory name
+		imgName = imageNameOrId
+	}
+
+	//build image release directory name.
+	imageReleaseDirName := imgName + "--" + string(cm.systemArchType) + "-release"
+
+	//get path of the silo executable on the host
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	//set basepath acording to architecture type
+	//prepare the destination path for the downloaded image based on its architecture type and name
+	var imageInstallationBasePath string
+	archType, err := GetSystemArchType()
+	if err != nil {
+		return fmt.Errorf("failed to get system architecture type: %s", err.Error())
+	}
+	if archType == Arm64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
+	} else if archType == Amd64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
+	} else {
+		return fmt.Errorf("unsupported architecture type: %s", archType)
+	}
+
+	//build up the absolute path to the image's root release package folder, which is what we will delete to remove the image from the system.
+	destPath := filepath.Join(filepath.Dir(exe),
+		imageInstallationBasePath,
+		imageReleaseDirName)
+
+	//check if the image is installed by checking if the destination path exists
+	if _, err := os.Stat(destPath); os.IsNotExist(err) {
+		return errors.New("image not installed: " + imageNameOrId)
+	}
+
+	//remove the image by deleting its root release package folder
+	if err := os.RemoveAll(destPath); err != nil {
+		return fmt.Errorf("failed to remove installed image: %w", err)
+	}
+
+	fmt.Println("Successfully removed installed image:", imageNameOrId, "for architecture:", archType)
+
+	return nil
+
 }
 
 // DownloadCatalogueImage downloads a specific Silo image from a given catalogue name, architecture type, and image name to a specified destination path.

@@ -128,6 +128,12 @@ func (se *SiloEngine) DownloadCatalogueImage(catalogueName string, imageIdOrName
 	return se.catalogueManager.DownloadCatalogueImage(catalogueName, imageIdOrName)
 }
 
+// RemoveInstalledImage removes a specific Silo image by id or name from the local system. If the image does not exist,
+// an error is returned.
+func (se *SiloEngine) RemoveInstalledImage(imageIdOrName string) error {
+	return se.catalogueManager.RemoveInstalledImage(imageIdOrName)
+}
+
 //Helpers....
 
 // startSession is a helper method that encapsulates the common logic for starting both transient and persistent Silo sessions.
