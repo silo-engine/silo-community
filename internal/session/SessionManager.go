@@ -211,6 +211,12 @@ func (sm *SessionManager) newSession(
 		s.Metadata = NewMetadata(baseImageMetaData)
 	}
 
+	// next ensure that the base image release directory exists for the specified base image,
+	imageNameAndVersion := s.Metadata.BaseImage.Distro + "-" + s.Metadata.BaseImage.Version
+	if !sm.baseImageReleaseDirExists(imageNameAndVersion, s.Metadata.BaseImage.ArchString) {
+		return nil, fmt.Errorf("The specified base image: %q exists in the catalogue, but DOES NOT appear to have been installed. You can install it using: \n 'silo images pull --name %s' ", imageNameAndVersion, imageNameAndVersion)
+	}
+
 	//setup the directory structure for the new session, including the upper, work, and merged directories.
 	for _, dir := range []string{s.Upper, s.Work, s.Merged} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -288,4 +294,33 @@ func (sm *SessionManager) deserializeFromFile(filePath string) (*Metadata, error
 	}
 
 	return &metadata, nil
+}
+
+// baseImageReleaseDirExists checks if the base image release directory exists for the
+// specified base image name. which will the the following form [image]-[version].
+func (sm *SessionManager) baseImageReleaseDirExists(baseImageName string, archString string) bool {
+
+	//build path to the top-level resources directory, which contains the Silo images.
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	resDir := filepath.Join(filepath.Dir(exe), "res")
+
+	//full path to image
+	imagePath := filepath.Join(
+		resDir,
+		"silo-images",
+		archString,
+		baseImageName+"-release",
+		baseImageName,
+	)
+
+	//check that the image directory exists,
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		return false
+	}
+
+	return true
+
 }
