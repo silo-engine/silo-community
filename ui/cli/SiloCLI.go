@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -153,9 +154,41 @@ func (scli *SiloCLI) Run() {
 
 			switch args[1] {
 			case "list":
-				//if err := scli.siloEngine.ListBaseImages(); err != nil {
-				//	fatal(err)
-				//}
+
+				fmt.Println("\nThe currently installed Silo Images are as follows:\n")
+
+				//grab the list of installed images from the silo engine.
+				installedImages, err := scli.siloEngine.ListAllInstalledImages()
+				if err != nil {
+					fatal(errors.New("failed to list installed images: " + err.Error()))
+				}
+
+				//prep table data using the installed images data.
+				var tableData [][]string
+
+				//first the table header...
+				tableData = append(tableData, []string{"Name", "Distro", "Version", "Release Version", "Release Checksum", "Installed", "Arch"})
+
+				//then the table data rows, one for each installed image.
+				for _, image := range installedImages {
+					tableData = append(tableData, []string{
+						image.Distro + "-" + image.Version,
+						image.Distro,
+						image.Version,
+						image.ReleaseVersion,
+						image.ReleaseChecksum[:20], //first 20 chracters of the checksum, for brevity.
+						fmt.Sprintf("%t", image.IsInstalled()),
+						image.GetArchString(),
+					})
+				}
+
+				//call into our silo table renderer helper component, taking care to pass in in
+				// the prepared table data, to render the table in the terminal
+				siloTableRenderer := NewSiloCLITableRenderer()
+				if err := siloTableRenderer.NewDefaultTableUI(tableData); err != nil {
+					fatal(err)
+				}
+
 			case "update":
 				//if err := scli.siloEngine.UpdateBaseImages(); err != nil {
 				//	fatal(err)

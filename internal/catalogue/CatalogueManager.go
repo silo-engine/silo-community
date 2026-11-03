@@ -174,6 +174,37 @@ func (cm *CatalogueManager) ListCatalogueImages(catalogueName string) ([]*SiloIm
 	return images, nil
 }
 
+// ListAllAvailableImages lists all Silo images across all catalogues for the current system architecture type.
+func (cm *CatalogueManager) ListAllAvailableImages() ([]*SiloImage, error) {
+	var allImages []*SiloImage
+
+	for _, catalogue := range cm.catalogues {
+		images := catalogue.ListImages(cm.systemArchType)
+		if images != nil {
+			allImages = append(allImages, images...)
+		}
+	}
+
+	return allImages, nil
+}
+
+// ListAllInstalledImages lists all Silo images that are currently installed on the system for the current system architecture type.
+func (cm *CatalogueManager) ListAllInstalledImages() ([]*SiloImage, error) {
+	var installedImages []*SiloImage
+
+	allImages, err := cm.ListAllAvailableImages()
+	if err != nil {
+		return nil, err
+	}
+	for _, image := range allImages {
+		if image.IsInstalled() {
+			installedImages = append(installedImages, image)
+		}
+	}
+
+	return installedImages, nil
+}
+
 // RemoveInstalledImage removes an installed Silo image from the system by deleting its root release package folder in the IMAGE_INSTALLATION_BASE_PATH directory for the given architecture type.
 // If the image is not installed, an error is returned.
 func (cm *CatalogueManager) RemoveInstalledImage(imageNameOrId string) error {

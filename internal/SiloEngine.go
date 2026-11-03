@@ -152,6 +152,18 @@ func (se *SiloEngine) RemoveInstalledImage(imageIdOrName string) error {
 	return se.catalogueManager.RemoveInstalledImage(imageIdOrName)
 }
 
+
+// ListAllInstalledImages returns a list of all Silo images that are currently installed on the local system.
+func (se *SiloEngine) ListAllInstalledImages() ([]*catalogue.SiloImage, error) {
+	return se.catalogueManager.ListAllInstalledImages()
+}
+
+//ListAllAvailableImages returns a list of all Silo images that are available for download, inclusive of those that
+// are already installed on the local system. This includes images from all catalogues, including the default Silo base image catalogue.
+func (se *SiloEngine) ListAllAvailableImages() ([]*catalogue.SiloImage, error) {
+	return se.catalogueManager.ListAllAvailableImages()
+}
+
 //Helpers....
 
 // startSession is a helper method that encapsulates the common logic for starting both transient and persistent Silo sessions.
