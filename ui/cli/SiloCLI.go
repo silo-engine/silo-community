@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/silo-engine/silo-community/internal"
+	"github.com/silo-engine/silo-community/internal/catalogue"
 )
 
 // SiloCLI is the command-line interface for the Silo application, providing users with a way to
@@ -155,12 +156,32 @@ func (scli *SiloCLI) Run() {
 			switch args[1] {
 			case "list":
 
-				fmt.Println("\nThe currently installed Silo Images are as follows:\n")
+				//attempt to find --all flag, if provided we'll list all available images, otherwise we'll only list installed images.
+				listAll := false
+				for _, arg := range args {
+					if arg == "--all" {
+						listAll = true
+						break
+					}
+				}
 
-				//grab the list of installed images from the silo engine.
-				installedImages, err := scli.siloEngine.ListAllInstalledImages()
-				if err != nil {
-					fatal(errors.New("failed to list installed images: " + err.Error()))
+				var titleMessage string
+				var imagesList []*catalogue.SiloImage
+				var err error
+				if listAll {
+					titleMessage = "The currently available Silo Images are as follows:\n"
+					imagesList, err = scli.siloEngine.ListAllAvailableImages()
+					if err != nil {
+						fatal(errors.New("failed to list available images: " + err.Error()))
+					}
+					fmt.Println(titleMessage)
+				} else {
+					titleMessage = "The currently installed Silo Images are as follows:\n"
+					imagesList, err = scli.siloEngine.ListAllInstalledImages()
+					if err != nil {
+						fatal(errors.New("failed to list installed images: " + err.Error()))
+					}
+					fmt.Println(titleMessage)
 				}
 
 				//prep table data using the installed images data.
@@ -170,7 +191,7 @@ func (scli *SiloCLI) Run() {
 				tableData = append(tableData, []string{"Name", "Distro", "Version", "Release Version", "Release Checksum", "Installed", "Arch"})
 
 				//then the table data rows, one for each installed image.
-				for _, image := range installedImages {
+				for _, image := range imagesList {
 					tableData = append(tableData, []string{
 						image.Distro + "-" + image.Version,
 						image.Distro,
@@ -182,10 +203,13 @@ func (scli *SiloCLI) Run() {
 					})
 				}
 
-				//call into our silo table renderer helper component, taking care to pass in in
-				// the prepared table data, to render the table in the terminal
-				siloTableRenderer := NewSiloCLITableRenderer()
-				if err := siloTableRenderer.NewDefaultTableUI(tableData); err != nil {
+				//build our silo table.
+				siloTable := NewdefaultTable().
+					WithData(tableData).
+					WithColourBoolColumn(tableData, 5)
+
+				//render the silo table to the terminal.
+				if err := siloTable.Render(); err != nil {
 					fatal(err)
 				}
 

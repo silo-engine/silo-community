@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gofrs/flock"
@@ -184,6 +185,11 @@ func (cm *CatalogueManager) ListAllAvailableImages() ([]*SiloImage, error) {
 			allImages = append(allImages, images...)
 		}
 	}
+
+	//sort the images by installed status so that installed images are listed first, followed by non-installed images.
+	sort.Slice(allImages, func(i, j int) bool {
+		return allImages[i].IsInstalled() && !allImages[j].IsInstalled()
+	})
 
 	return allImages, nil
 }
