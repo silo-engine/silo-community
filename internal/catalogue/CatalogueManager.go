@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/gofrs/flock"
 )
 
 const IMAGE_CATALOGUES_BASE_PATH = "res/silo-images/catalogues"
@@ -19,6 +21,7 @@ const OFFICIAL_BASE_IMAGE_CATALOGUE_FILE_NAME = "silo-image-catalogue.json"
 const IMAGE_INSTALLATION_BASE_PATH = "res/silo-images"
 const IMAGE_INSTALLATION_BASE_PATH_ARM64 = IMAGE_INSTALLATION_BASE_PATH + "/arm64"
 const IMAGE_INSTALLATION_BASE_PATH_AMD64 = IMAGE_INSTALLATION_BASE_PATH + "/amd64"
+const IMAGE_LOCK_FILE = "image.lock"
 
 // CatalogueManager manages the silo image catalogues.
 type CatalogueManager struct {
@@ -193,6 +196,16 @@ func (cm *CatalogueManager) RemoveInstalledImage(imageNameOrId string) error {
 		imgName = imageNameOrId
 	}
 
+	// before proceeding we obtain a lock on the image to prevent it from being deleted
+	// while it is in use by another process. Critically we pass in true to AcquireImageLock to obtain an exclusive lock,
+	// which will fail where one or more processes have already obtained a read lock on the image, which indicates that the image
+	// is in use and cannot be deleted.
+	imageLock, err := cm.AcquireImageLock(imgName, true)
+	if err != nil {
+		return errors.New("Failed to remove installed image: " + imgName + " error: " + err.Error())
+	}
+	defer imageLock.Unlock()
+
 	//build image release directory name.
 	imageReleaseDirName := imgName + "--" + string(cm.systemArchType) + "-release"
 
@@ -273,6 +286,71 @@ func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageId
 		return cm.downloadCatalogueImageById(catalogue, archType, imageIdOrName)
 	}
 
+}
+
+// AcquireImageLock acquires a read lock on the specified image to prevent it from being deleted while it is in use.
+// critically, this is a read lock, which means that multiple processes can acquire a read lock on the same image simultaneously,
+// but only one process can acquire a write lock on the image at a time. This ensures that an image cannot be deleted while
+// it is in use by another process. The imageName will take the following form: <distro>-<version> e.g. ubuntu-22.04 or debian-12.0
+func (cm *CatalogueManager) AcquireImageLock(imageName string, exclusive bool) (*flock.Flock, error) {
+
+	var locked bool
+	var err error
+
+	//build release directory name from provided image name
+	imageReleaseDirName := imageName + "--" + string(cm.systemArchType) + "-release"
+
+	//set basepath acording to architecture type
+	//prepare the destination path for the downloaded image based on its architecture type and name
+	var imageInstallationBasePath string
+	archType, err := GetSystemArchType()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system architecture type: %s", err.Error())
+	}
+	if archType == Arm64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
+	} else if archType == Amd64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
+	} else {
+		return nil, fmt.Errorf("unsupported architecture type: %s", archType)
+	}
+
+	//build path to root image directory where the lock file will be stored
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	//build absolute path to the image's root release package folder, which is where we will store the lock file.
+	absReleaseDirPath := filepath.Join(filepath.Dir(exe),
+		imageInstallationBasePath,
+		imageReleaseDirName)
+
+	//check that the image release directory exists, if not return an error as we cannot acquire a lock on a non-existent image.
+	if _, err := os.Stat(absReleaseDirPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("Unable to acquire image lock: the image: %s does not appear to be installed.", imageName)
+	}
+
+	//create lock file at the image release directory path.
+	lockPath := filepath.Join(absReleaseDirPath, IMAGE_LOCK_FILE)
+	fileLock := flock.New(lockPath)
+
+	//obtain R or RW lock depending on the exlusive flag
+	if exclusive {
+		locked, err = fileLock.TryLock()
+	} else {
+		locked, err = fileLock.TryRLock()
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("acquire image lock: %w", err)
+	}
+
+	if !locked {
+		return nil, fmt.Errorf("image is currently in use")
+	}
+
+	return fileLock, nil
 }
 
 //helpers

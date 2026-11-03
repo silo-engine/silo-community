@@ -102,18 +102,31 @@ func (sm *SessionManager) Load(name string) (*SiloSession, error) {
 		return nil, fmt.Errorf("environment %q is not a directory", name)
 	}
 
-	loadedSession, err := sm.newSession(root, false, name, false, "")
-	if err != nil {
-		return nil, fmt.Errorf("load environment %q: %w", name, err)
-	}
-
-	//finally load the sessions metadata which will crucially include the details of the base image
-	// used to create the session, from the metadata.json file in the session's root directory and
-	// associate it with the loaded session.
-	metadata, err := sm.deserializeFromFile(filepath.Join(loadedSession.Root, "metadata.json"))
+	// Load metadata first so we can validate and construct the session against the
+	// original base image this environment was created with.
+	metadata, err := sm.deserializeFromFile(filepath.Join(root, "metadata.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load session metadata: %w", err)
 	}
+
+	if metadata == nil || metadata.BaseImage == nil {
+		return nil, fmt.Errorf("load session metadata: missing base image metadata")
+	}
+
+	imageIdOrName := metadata.BaseImage.ReleaseVersion
+	if imageIdOrName == "" {
+		if metadata.BaseImage.Distro == "" || metadata.BaseImage.Version == "" {
+			return nil, fmt.Errorf("load session metadata: missing base image identity")
+		}
+		imageIdOrName = metadata.BaseImage.Distro + "-" + metadata.BaseImage.Version
+	}
+
+	loadedSession, err := sm.newSession(root, false, name, false, imageIdOrName)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to load session: %q: %w", name, err)
+	}
+
+	// Preserve the original persisted metadata on the loaded session.
 	loadedSession.Metadata = metadata
 
 	return loadedSession, nil
@@ -130,7 +143,7 @@ func (sm *SessionManager) Destroy(name string) error {
 
 func (sm *SessionManager) AcquireSessionLock(name string) (*flock.Flock, error) {
 	envPath := filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
-	lockPath := filepath.Join(envPath, "session.lock")
+	lockPath := filepath.Join(envPath, SESSION_LOCK_FILE)
 	fileLock := flock.New(lockPath)
 
 	locked, err := fileLock.TryLock()
@@ -319,7 +332,7 @@ func (sm *SessionManager) baseImageReleaseDirExists(baseImageName string, archSt
 		baseImageName,
 	)
 
-	//check that the image directory exists,
+	//if the image path exists, return true, otherwise return false.
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
 		return false
 	}

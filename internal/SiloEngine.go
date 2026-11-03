@@ -58,6 +58,15 @@ func (se *SiloEngine) StartTransientSession(opts *SiloEngineOpts) error {
 	}
 	defer s.Cleanup()
 
+	// Acquire image lock on the session's base image and defer its release. This will prevent other processes from
+	// modifying/deleting the base image while the session is active.
+	imageName := s.Metadata.BaseImage.Distro + "-" + s.Metadata.BaseImage.Version
+	imageLock, err := se.catalogueManager.AcquireImageLock(imageName, false)
+	if err != nil {
+		return errors.New("An error occurred whilst attempting to acquire a lock on the Silo Session's base image: " + err.Error())
+	}
+	defer imageLock.Unlock()
+
 	//call helper func to start the silo session.
 	return se.startSession(s)
 }
@@ -75,12 +84,21 @@ func (se *SiloEngine) StartPersistentSession(sessionName string) error {
 	}
 	defer s.Cleanup()
 
-	// Acquire lock on the session and defer its release.
-	lock, err := se.sessionManager.AcquireSessionLock(sessionName)
+	// Acquire sessionLock on the session and defer its release.
+	sessionLock, err := se.sessionManager.AcquireSessionLock(sessionName)
 	if err != nil {
 		return errors.New("An error occurred whilst attempting to acquire a lock on the Silo Session: " + err.Error())
 	}
-	defer lock.Unlock()
+	defer sessionLock.Unlock()
+
+	// Acquire image lock on the session's base image and defer its release. This will prevent other processes from
+	// modifying/deleting the base image while the session is active.
+	imageName := s.Metadata.BaseImage.Distro + "-" + s.Metadata.BaseImage.Version
+	imageLock, err := se.catalogueManager.AcquireImageLock(imageName, false)
+	if err != nil {
+		return errors.New("An error occurred whilst attempting to acquire a lock on the Silo Session's base image: " + err.Error())
+	}
+	defer imageLock.Unlock()
 
 	//call helper func to start the silo session.
 	return se.startSession(s)
