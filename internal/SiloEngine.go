@@ -152,16 +152,22 @@ func (se *SiloEngine) RemoveInstalledImage(imageIdOrName string) error {
 	return se.catalogueManager.RemoveInstalledImage(imageIdOrName)
 }
 
-
 // ListAllInstalledImages returns a list of all Silo images that are currently installed on the local system.
 func (se *SiloEngine) ListAllInstalledImages() ([]*catalogue.SiloImage, error) {
 	return se.catalogueManager.ListAllInstalledImages()
 }
 
-//ListAllAvailableImages returns a list of all Silo images that are available for download, inclusive of those that
+// ListAllAvailableImages returns a list of all Silo images that are available for download, inclusive of those that
 // are already installed on the local system. This includes images from all catalogues, including the default Silo base image catalogue.
 func (se *SiloEngine) ListAllAvailableImages() ([]*catalogue.SiloImage, error) {
 	return se.catalogueManager.ListAllAvailableImages()
+}
+
+// UpdateInstalledImages updates all installed Silo images to their latest available versions,
+// if newer versions exist in the catalogues. At present ONLY IMAGES IN THE DEFAULT SILO BASE IMAGE CATALOGUE ARE UPDATED.
+// Where a specific image is provided, only that image will be updated if a newer version exists in the catalogues.
+func (se *SiloEngine) UpdateInstalledImages(imageIdOrName string) error {
+	return se.catalogueManager.UpdateInstalledImages(imageIdOrName)
 }
 
 //Helpers....

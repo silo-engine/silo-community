@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gofrs/flock"
@@ -108,6 +109,10 @@ func (cm *CatalogueManager) GetCatalogue(name string) (*SiloImageCatalogue, bool
 	return catalogue, exists
 }
 
+// GetCatalogueImage retrieves a SiloImage from a catalogue by its name or ID.
+// Note: This function will always return the latest version of the image where an"image name" is
+//
+//	specified. To retreive a SPECIFIC version an "image id" should be provided.
 func (cm *CatalogueManager) GetCatalogueImage(imageNameOrId string) (*SiloImage, bool) {
 
 	if imageNameOrId == "" {
@@ -390,7 +395,133 @@ func (cm *CatalogueManager) AcquireImageLock(imageName string, exclusive bool) (
 	return fileLock, nil
 }
 
+// UpdateInstalledImages check the version of installed images against the latest versions in the
+// catalogue and updates the installed images to the latest version if they are out of date.
+func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
+
+	//array ti storer of installed images that are out of date and need to be updated.
+	var imagesToUpdate []*SiloImage
+
+	//create a temp working dir
+	tempDir, listErr := os.MkdirTemp("", "silo-catalogue-update-*")
+	if listErr != nil {
+		return fmt.Errorf("failed to create temp update working dir: %w", listErr)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// clone the silo-images repo that contains the official base image catalogue to
+	// the temp working dir. The catalogue will ccontain the most up-to-date information about
+	// the latest versions of the base images.
+	cmd := exec.Command(
+		"git",
+		"-c", "credential.helper=",
+		"clone",
+		"https://github.com/silo-engine/silo-images.git",
+		tempDir,
+	)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to clone silo-images repo: %w", err)
+	}
+
+	// copy the official base image catalogue from the cloned repo to the catalogues directory in the silo executable's res dir,
+	// overwriting the existing catalogue file....
+
+	//build path to the silo executable's res dir where the catalogues are stored
+	exe, listErr := os.Executable()
+	if listErr != nil {
+		return fmt.Errorf("failed to get executable path: %w", listErr)
+	}
+	catalogueDir := filepath.Join(filepath.Dir(exe), IMAGE_CATALOGUES_BASE_PATH)
+
+	//enaure the catalogue directory exists, if not create it.
+	if err := os.MkdirAll(catalogueDir, 0755); err != nil {
+		return fmt.Errorf("failed to create catalogues directory: %w", err)
+	}
+
+	catalogueSrcPath := filepath.Join(tempDir, OFFICIAL_BASE_IMAGE_CATALOGUE_FILE_NAME)
+	catalogueDestPath := filepath.Join(catalogueDir, OFFICIAL_BASE_IMAGE_CATALOGUE_FILE_NAME)
+	if copyErr := copyFile(catalogueSrcPath, catalogueDestPath); copyErr != nil {
+		return fmt.Errorf("failed to copy catalogue file: %w", copyErr)
+	}
+	fmt.Println("Sucessfully pulled and stored the latest image catalogue.")
+
+	//grab reference to a list of all currently installed images, using the public interface ListAllInstalledImages method.
+	installedImages, listErr := cm.ListAllInstalledImages()
+	if listErr != nil {
+		return fmt.Errorf("failed to list installed images: %w", listErr)
+	}
+
+	//for each installed image, check if it there release_version id is less than the latest release_version id in the catalogue,
+	// if so add it to the list of images to update.
+	for _, image := range installedImages {
+		if image.ReleaseVersion != "" {
+
+			//convert the release version string to an integer for comparison, if it fails return an error.
+			installedReleaseVersion, err := strconv.Atoi(image.ReleaseVersion)
+			if err != nil {
+				return fmt.Errorf("failed to convert installed image release version to int: %w", err)
+			}
+
+			//grab the latest release version for the image from the catalogue.
+			catalogueImage, exists := cm.GetCatalogueImage(image.Distro + "-" + image.Version)
+			if !exists {
+				return fmt.Errorf("failed to find image in catalogue: %s-%s", image.Distro, image.Version)
+			}
+
+			latestReleaseVersion, err := strconv.Atoi(catalogueImage.ReleaseVersion)
+			if err != nil {
+				return fmt.Errorf("failed to convert catalogue image release version to int: %w", err)
+			}
+
+			//compare the installed release version with the latest release version from the catalogue.
+			if installedReleaseVersion < latestReleaseVersion {
+				imagesToUpdate = append(imagesToUpdate, catalogueImage)
+			}
+		}
+	}
+
+	//print status message to the user about the number of images that need to be updated
+	//and their respective names.
+	if len(imagesToUpdate) == 0 {
+		fmt.Println("All installed images are up to date.")
+		return nil
+	}
+	fmt.Printf("Found %d installed images that are out of date and need to be updated.\n", len(imagesToUpdate))
+	fmt.Println("The following images will be updated:")
+	for _, image := range imagesToUpdate {
+		fmt.Printf("  - %s (%s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion)
+	}
+
+	return nil
+}
+
 //helpers
+
+func copyFile(src, dst string) error {
+	sourceFileStat, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if !sourceFileStat.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", src)
+	}
+
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	_, err = io.Copy(destination, source)
+	return err
+}
 
 func (cm *CatalogueManager) downloadCatalogueImageById(catalogue *SiloImageCatalogue, archType ArchType, imageId string) error {
 
