@@ -110,9 +110,8 @@ func (cm *CatalogueManager) GetCatalogue(name string) (*SiloImageCatalogue, bool
 }
 
 // GetCatalogueImage retrieves a SiloImage from a catalogue by its name or ID.
-// Note: This function will always return the latest version of the image where an"image name" is
-//
-//	specified. To retreive a SPECIFIC version an "image id" should be provided.
+// Note: This function will always return the latest version of the image where an "image name"
+// is specified. To retreive a SPECIFIC version an "image id" should be provided.
 func (cm *CatalogueManager) GetCatalogueImage(imageNameOrId string) (*SiloImage, bool) {
 
 	if imageNameOrId == "" {
@@ -125,9 +124,22 @@ func (cm *CatalogueManager) GetCatalogueImage(imageNameOrId string) (*SiloImage,
 			imageNameOrIdParts := strings.SplitN(imageNameOrId, "-", 2)
 			distro := imageNameOrIdParts[0]
 			version := imageNameOrIdParts[1]
-			if image := catalogue.GetImageByDistroAndVersion(cm.systemArchType, distro, version); image != nil {
-				image.SetArchString(string(cm.systemArchType))
-				return image, true
+			if images := catalogue.GetImageByDistroAndVersion(cm.systemArchType, distro, version); len(images) > 0 {
+				if len(images) == 1 {
+					images[0].SetArchString(string(cm.systemArchType))
+					return images[0], true
+				} else {
+
+					//if multiple images are found for the same distro and version, we will return the latest one b
+					// ased on its release version....
+
+					//sort the matching images by release version in descending order and return the first one.
+					sort.Slice(images, func(i, j int) bool {
+						return images[i].ReleaseVersion > images[j].ReleaseVersion
+					})
+					return images[0], true
+				}
+
 			}
 		} else {
 			//otherwise search for the image by its id, which is always numeric and unique across catalogues and architectures.
@@ -445,39 +457,51 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 	}
 	fmt.Println("Sucessfully pulled and stored the latest image catalogue.")
 
-	//grab reference to a list of all currently installed images, using the public interface ListAllInstalledImages method.
-	installedImages, listErr := cm.ListAllInstalledImages()
-	if listErr != nil {
-		return fmt.Errorf("failed to list installed images: %w", listErr)
-	}
+	//if an image name is provided, we will only update that image, otherwise we will check all installed images.
+	if imageName != "" {
+		image, exists := cm.GetCatalogueImage(imageName)
+		if !exists {
+			return fmt.Errorf("image not found in catalogue: %s", imageName)
+		}
+		imagesToUpdate = append(imagesToUpdate, image)
+	} else {
+		//otherwise we will check all installed images.
 
-	//for each installed image, check if it there release_version id is less than the latest release_version id in the catalogue,
-	// if so add it to the list of images to update.
-	for _, image := range installedImages {
-		if image.ReleaseVersion != "" {
+		//grab reference to a list of all currently installed images, using the public interface ListAllInstalledImages method.
+		installedImages, listErr := cm.ListAllInstalledImages()
+		if listErr != nil {
+			return fmt.Errorf("failed to list installed images: %w", listErr)
+		}
 
-			//convert the release version string to an integer for comparison, if it fails return an error.
-			installedReleaseVersion, err := strconv.Atoi(image.ReleaseVersion)
-			if err != nil {
-				return fmt.Errorf("failed to convert installed image release version to int: %w", err)
-			}
+		//for each installed image, check if it there release_version id is less than the latest release_version id in the catalogue,
+		// if so add it to the list of images to update.
+		for _, image := range installedImages {
+			if image.ReleaseVersion != "" {
 
-			//grab the latest release version for the image from the catalogue.
-			catalogueImage, exists := cm.GetCatalogueImage(image.Distro + "-" + image.Version)
-			if !exists {
-				return fmt.Errorf("failed to find image in catalogue: %s-%s", image.Distro, image.Version)
-			}
+				//convert the release version string to an integer for comparison, if it fails return an error.
+				installedReleaseVersion, err := strconv.Atoi(image.ReleaseVersion)
+				if err != nil {
+					return fmt.Errorf("failed to convert installed image release version to int: %w", err)
+				}
 
-			latestReleaseVersion, err := strconv.Atoi(catalogueImage.ReleaseVersion)
-			if err != nil {
-				return fmt.Errorf("failed to convert catalogue image release version to int: %w", err)
-			}
+				//grab the latest release version for the image from the catalogue.
+				catalogueImage, exists := cm.GetCatalogueImage(image.Distro + "-" + image.Version)
+				if !exists {
+					return fmt.Errorf("failed to find image in catalogue: %s-%s", image.Distro, image.Version)
+				}
 
-			//compare the installed release version with the latest release version from the catalogue.
-			if installedReleaseVersion < latestReleaseVersion {
-				imagesToUpdate = append(imagesToUpdate, catalogueImage)
+				latestReleaseVersion, err := strconv.Atoi(catalogueImage.ReleaseVersion)
+				if err != nil {
+					return fmt.Errorf("failed to convert catalogue image release version to int: %w", err)
+				}
+
+				//compare the installed release version with the latest release version from the catalogue.
+				if installedReleaseVersion < latestReleaseVersion {
+					imagesToUpdate = append(imagesToUpdate, catalogueImage)
+				}
 			}
 		}
+
 	}
 
 	//print status message to the user about the number of images that need to be updated
@@ -490,6 +514,15 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 	fmt.Println("The following images will be updated:")
 	for _, image := range imagesToUpdate {
 		fmt.Printf("  - %s (%s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion)
+	}
+
+	//next we will download and unpack each image that needs to be updated, overwriting the existing installed image.
+	for _, image := range imagesToUpdate {
+		fmt.Printf("Updating image: %s (%s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion)
+		if err := cm.downloadAndUnpackCatalogueImage(image, cm.systemArchType); err != nil {
+			return fmt.Errorf("failed to download and unpack image: %w", err)
+		}
+		fmt.Printf("Successfully updated image: %s (%s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion)
 	}
 
 	return nil
@@ -544,14 +577,15 @@ func (cm *CatalogueManager) downloadCatalogueImageById(catalogue *SiloImageCatal
 //	system architecture type, where available. If the catalogue or image does not exist, an error is returned.
 func (cm *CatalogueManager) downloadCatalogueImageByName(catalogue *SiloImageCatalogue, archType ArchType, imageName string) error {
 
-	imageNameParts := strings.SplitN(imageName, "-", 2)
-	if len(imageNameParts) != 2 {
-		return errors.New("invalid image name: " + imageName + " expected format: <distro>-<version> e.g. ubuntu-22.04 or debian-12.0")
-	}
-	distro := imageNameParts[0]
-	version := imageNameParts[1]
-	image := catalogue.GetImageByDistroAndVersion(archType, distro, version)
-	if image == nil {
+	//imageNameParts := strings.SplitN(imageName, "-", 2)
+	//if len(imageNameParts) != 2 {
+	//	return errors.New("invalid image name: " + imageName + " expected format: <distro>-<version> e.g. ubuntu-22.04 or debian-12.0")
+	//}
+	//distro := imageNameParts[0]
+	//version := imageNameParts[1]
+	//image := catalogue.GetImageByDistroAndVersion(archType, distro, version)
+	image, found := cm.GetCatalogueImage(imageName)
+	if !found {
 		return errors.New("image not found: " + imageName + " for architecture: " + string(archType))
 	}
 

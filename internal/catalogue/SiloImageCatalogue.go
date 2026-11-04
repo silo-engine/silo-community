@@ -42,14 +42,21 @@ func (c *SiloImageCatalogue) GetImageByID(archType ArchType, id string) *SiloIma
 	return nil
 }
 
-func (c *SiloImageCatalogue) GetImageByDistroAndVersion(archType ArchType, distro string, version string) *SiloImage {
+func (c *SiloImageCatalogue) GetImageByDistroAndVersion(archType ArchType, distro string, version string) []*SiloImage {
+
+	//call into our public interface method to get all images for the specified architecture.
 	images := c.ListImages(archType)
+
+	//crucially, multiple images may exist for the same distro and version, but with different release versions.
+	//thus we store all matches to our array..
+	var matchingImages []*SiloImage
 	for _, image := range images {
 		if image.Distro == distro && image.Version == version {
-			return image
+			matchingImages = append(matchingImages, image)
 		}
 	}
-	return nil
+
+	return matchingImages
 }
 
 // SiloImage represents a single Silo image in the catalogue.
