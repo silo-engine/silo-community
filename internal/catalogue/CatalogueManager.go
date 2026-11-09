@@ -95,7 +95,7 @@ func (cm *CatalogueManager) ListBaseImageCatalogueImages() ([]*SiloImage, error)
 		return nil, errors.New("base image catalogue not found")
 	}
 
-	images := catalogue.ListImages(cm.systemArchType)
+	images := catalogue.ListImages(cm.systemArchType, false)
 	if images == nil {
 		return nil, errors.New("no images found for architecture: " + string(cm.systemArchType))
 	}
@@ -184,7 +184,7 @@ func (cm *CatalogueManager) ListCatalogueImages(catalogueName string) ([]*SiloIm
 		return nil, errors.New("catalogue not found: " + catalogueName)
 	}
 
-	images := catalogue.ListImages(cm.systemArchType)
+	images := catalogue.ListImages(cm.systemArchType, false)
 	if images == nil {
 		return nil, errors.New("no images found for architecture: " + string(cm.systemArchType))
 	}
@@ -197,7 +197,7 @@ func (cm *CatalogueManager) ListAllAvailableImages() ([]*SiloImage, error) {
 	var allImages []*SiloImage
 
 	for _, catalogue := range cm.catalogues {
-		images := catalogue.ListImages(cm.systemArchType)
+		images := catalogue.ListImages(cm.systemArchType, false)
 		if images != nil {
 			allImages = append(allImages, images...)
 		}
@@ -237,10 +237,12 @@ func (cm *CatalogueManager) RemoveInstalledImage(imageNameOrId string) error {
 	}
 
 	var imgName string
+	var image *SiloImage
+	var exists bool
 	if !imageReferencedByName(imageNameOrId) {
 		//if the image is NOT referenced by name we must first lookup its name in the catalogue by
 		//id as the root release package folder is named according to the image name and version, not its id.
-		image, exists := cm.GetCatalogueImage(imageNameOrId)
+		image, exists = cm.GetCatalogueImage(imageNameOrId)
 		if !exists {
 			return errors.New("image not found: " + imageNameOrId)
 		}
@@ -297,6 +299,11 @@ func (cm *CatalogueManager) RemoveInstalledImage(imageNameOrId string) error {
 	//remove the image by deleting its root release package folder
 	if err := os.RemoveAll(destPath); err != nil {
 		return fmt.Errorf("failed to remove installed image: %w", err)
+	}
+
+	//set installed status to false in the catalogue for the image that was just removed, if it exists in the catalogue.
+	if image != nil {
+		image.SetInstalled(false)
 	}
 
 	fmt.Println("Successfully removed installed image:", imageNameOrId, "for architecture:", archType)
