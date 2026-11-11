@@ -707,7 +707,25 @@ func (cm *CatalogueManager) isImageInstalled(archType ArchType, image *SiloImage
 	// If it does, the image is considered installed.
 	imageRootFolderName := image.Distro + "-" + image.Version + "--" + string(archType) + "-release"
 	destPath := filepath.Join(imageInstallationBasePath, imageRootFolderName)
-	if _, err := os.Stat(destPath); err == nil {
+	if _, err := os.Stat(destPath); err != nil {
+		return false
+	}
+
+	//next we open and parse the manifest.json file in the image's root release package folder to check if the specific RELEASE_VERSION of the image is installed.
+	// This is important because a user may have an older version of the image installed, but not the latest version.
+	manifestFilePath := filepath.Join(destPath, "manifest.json")
+	manifestData, err := os.ReadFile(manifestFilePath)
+	if err != nil {
+		return false
+	}
+
+	var manifest Manifest
+	err = json.Unmarshal(manifestData, &manifest)
+	if err != nil {
+		return false
+	}
+
+	if manifest.ReleaseVersion == image.ReleaseVersion {
 		return true
 	}
 
