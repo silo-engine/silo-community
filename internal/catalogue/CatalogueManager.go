@@ -420,6 +420,7 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 
 	//array ti storer of installed images that are out of date and need to be updated.
 	var imagesToUpdate []*SiloImage
+	var latestImages []*SiloImage
 
 	//create a temp working dir
 	tempDir, listErr := os.MkdirTemp("", "silo-catalogue-update-*")
@@ -464,13 +465,48 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 	}
 	fmt.Println("Sucessfully pulled and stored the latest image catalogue.")
 
+	//reload the catalogue, i.e the new one we downloaded which may or may not include new image definitions
+	if reloadCatErr := cm.loadAllCataloguesFromJSONFiles(); reloadCatErr != nil {
+		return fmt.Errorf("failed to reload image catalogues: %w", reloadCatErr)
+	}
+	fmt.Println("Successfully reloaded latest image catalogue(s)")
+
 	//if an image name is provided, we will only update that image, otherwise we will check all installed images.
 	if imageName != "" {
-		image, exists := cm.GetCatalogueImage(imageName)
-		if !exists {
-			return fmt.Errorf("image not found in catalogue: %s", imageName)
+
+		//attempt to get installed image with the specified name.
+		installedImage, getImgErr := cm.getInstalledImageByNameOrId(imageName)
+		if getImgErr != nil {
+			return fmt.Errorf("failed to get installed image with name or ID %s: %w", imageName, getImgErr)
 		}
-		imagesToUpdate = append(imagesToUpdate, image)
+
+		//build installed image name (i.e distro-version)  to provide to GetCatalogueImage which
+		//will, in turn, return the latest image of that name, where one exists.
+		installedImageName := installedImage.Distro + "-" + installedImage.Version
+
+		//next grab the latest lastestImage with the same name from the catalogue, if it exists,
+		lastestImage, exists := cm.GetCatalogueImage(installedImageName)
+		if !exists {
+			return fmt.Errorf("no matching image not found in catalogue: %s", imageName)
+		}
+
+		installedImageReleaseVersion, err := strconv.Atoi(installedImage.ReleaseVersion)
+		if err != nil {
+			return fmt.Errorf("failed to convert installed image release version to int: %w", err)
+		}
+
+		latestImageReleaseVersion, err := strconv.Atoi(lastestImage.ReleaseVersion)
+		if err != nil {
+			return fmt.Errorf("failed to convert latest image release version to int: %w", err)
+		}
+
+		//if the installed imaages release id is less than the latest images thisn indicates that
+		// the installed image is out of date and needs to be updated, so we will add it to the list of images to update.
+		if installedImageReleaseVersion < latestImageReleaseVersion {
+			imagesToUpdate = append(imagesToUpdate, installedImage)
+			latestImages = append(latestImages, lastestImage)
+		}
+
 	} else {
 		//otherwise we will check all installed images.
 
@@ -504,7 +540,8 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 
 				//compare the installed release version with the latest release version from the catalogue.
 				if installedReleaseVersion < latestReleaseVersion {
-					imagesToUpdate = append(imagesToUpdate, catalogueImage)
+					latestImages = append(latestImages, catalogueImage)
+					imagesToUpdate = append(imagesToUpdate, image)
 				}
 			}
 		}
@@ -517,19 +554,21 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 		fmt.Println("All installed images are up to date.")
 		return nil
 	}
-	fmt.Printf("Found %d installed images that are out of date and need to be updated.\n", len(imagesToUpdate))
+	fmt.Printf("Found %d installed image(s) that are out of date and need to be updated.\n", len(imagesToUpdate))
 	fmt.Println("The following images will be updated:")
 	for _, image := range imagesToUpdate {
 		fmt.Printf("  - %s (%s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion)
 	}
 
 	//next we will download and unpack each image that needs to be updated, overwriting the existing installed image.
-	for _, image := range imagesToUpdate {
+	for idx, image := range imagesToUpdate {
 		fmt.Printf("Updating image: %s (%s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion)
-		if err := cm.downloadAndUnpackCatalogueImage(image, cm.systemArchType); err != nil {
+		latestImage := latestImages[idx]
+		if err := cm.downloadAndUnpackCatalogueImage(latestImage, cm.systemArchType); err != nil {
 			return fmt.Errorf("failed to download and unpack image: %w", err)
 		}
-		fmt.Printf("Successfully updated image: %s (%s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion)
+
+		fmt.Printf("Successfully updated image: %s (%s -> %s)\n", image.Distro+"-"+image.Version, image.ReleaseVersion, latestImage.ReleaseVersion)
 	}
 
 	return nil
@@ -563,6 +602,28 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// getInstalledImageByNameOrId retrieves an installed Silo image by its name or id. If the image is not installed, an error is returned.
+func (cm *CatalogueManager) getInstalledImageByNameOrId(imageNameOrId string) (*SiloImage, error) {
+
+	if imageNameOrId == "" {
+		return nil, errors.New("no image name or id provided")
+	}
+
+	images, listErr := cm.ListAllInstalledImages()
+	if listErr != nil {
+		return nil, errors.New("An error occurred while listing installed images: " + listErr.Error())
+	}
+
+	for _, image := range images {
+		if image.Distro+"-"+image.Version == imageNameOrId || image.ReleaseVersion == imageNameOrId {
+			return image, nil
+		}
+	}
+
+	return nil, errors.New("image not found: " + imageNameOrId)
+}
+
+// downloadCatalogueImageById downloads a specific Silo image from a given catalogue name and image id.
 func (cm *CatalogueManager) downloadCatalogueImageById(catalogue *SiloImageCatalogue, archType ArchType, imageId string) error {
 
 	image := catalogue.GetImageByID(archType, imageId)
@@ -670,11 +731,15 @@ func (cm *CatalogueManager) markInstalledImages(catalogue *SiloImageCatalogue) {
 	for _, image := range catalogue.SiloImages.Arm64 {
 		if cm.isImageInstalled(Arm64, image) {
 			image.SetInstalled(true)
+		} else {
+			image.SetInstalled(false)
 		}
 	}
 	for _, image := range catalogue.SiloImages.Amd64 {
 		if cm.isImageInstalled(Amd64, image) {
 			image.SetInstalled(true)
+		} else {
+			image.SetInstalled(false)
 		}
 	}
 }
