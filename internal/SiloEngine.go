@@ -170,6 +170,11 @@ func (se *SiloEngine) UpdateInstalledImages(imageIdOrName string) error {
 	return se.catalogueManager.UpdateInstalledImages(imageIdOrName)
 }
 
+//ListSessions calls into the session manager to list all existing persistent Silo sessions on the local system.
+func (se *SiloEngine) ListSessions() ([]*session.Metadata, error) {
+	return se.sessionManager.List()
+}
+
 //Helpers....
 
 // startSession is a helper method that encapsulates the common logic for starting both transient and persistent Silo sessions.

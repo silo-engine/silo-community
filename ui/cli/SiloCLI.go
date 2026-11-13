@@ -154,7 +154,7 @@ func (scli *SiloCLI) Run() {
 		} else {
 
 			switch args[1] {
-			case "list":
+			case "ls":
 
 				//attempt to find --all flag, if provided we'll list all available images, otherwise we'll only list installed images.
 				listAll := false
@@ -326,6 +326,38 @@ func (scli *SiloCLI) Run() {
 
 		}
 
+	case "sessions":
+		if len(args) == 1 {
+			fmt.Fprintln(os.Stderr, "silo: no sessions operation provided")
+			usageAndExit()
+		} else {
+
+			switch args[1] {
+			case "ls":
+				sessions, err := scli.siloEngine.ListSessions()
+				if err != nil {
+					fatal(err)
+				}
+
+				fmt.Println("The currently available Silo sessions are as follows:")
+				for _, session := range sessions {
+					fmt.Printf("  - %s\n", session.Name)
+				}
+			case "rm":
+				if len(args) < 3 {
+					fmt.Fprintln(os.Stderr, "silo: no session name provided for remove operation")
+					usageAndExit()
+				}
+				sessionName := args[2]
+				if err := scli.siloEngine.DestroySession(sessionName); err != nil {
+					fatal(err)
+				}
+				fmt.Printf("Destroyed Silo session/environment %q\n", sessionName)
+			default:
+				fmt.Fprintln(os.Stderr, "silo: unknown sessions operation provided")
+				usageAndExit()
+			}
+		}
 	default:
 		usageAndExit()
 	}

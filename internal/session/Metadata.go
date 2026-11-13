@@ -2,7 +2,9 @@ package session
 
 // Metadata holds information about the Silo session, including details about the base image used to create the session.
 type Metadata struct {
-	BaseImage *BaseImageMetadata
+	Name      string             `json:"name"`
+	BaseImage *BaseImageMetadata `json:"base_image"`
+	CreatedAt string             `json:"created_at"`
 }
 
 // BaseImageMetadata holds information about the base image used to create the Silo session.
@@ -13,13 +15,17 @@ type BaseImageMetadata struct {
 	ReleaseChecksum string `json:"release_checksum"`
 	Description     string `json:"description"`
 	ImageURL        string `json:"image_url"`
-	ArchString      string `json:"arch_string"` 
+	ArchString      string `json:"arch_string"`
 }
 
 // NewMetadata creates a new Metadata instance with the provided base image metadata.
-func NewMetadata(baseImage *BaseImageMetadata) *Metadata {
+func NewMetadata(baseImage *BaseImageMetadata,
+	name string,
+	createdAt string) *Metadata {
 	return &Metadata{
 		BaseImage: baseImage,
+		Name:      name,
+		CreatedAt: createdAt,
 	}
 }
 

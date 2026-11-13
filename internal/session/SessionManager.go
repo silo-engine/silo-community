@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/silo-engine/silo-community/internal/catalogue"
@@ -82,6 +83,35 @@ func (sm *SessionManager) NewPersistent(name string, imageidOrName string) (*Sil
 	return sess, nil
 }
 
+// LoadMeta loads the metadata for a persistent named environment without loading the full session.
+func (sm *SessionManager) LoadMeta(name string) (*Metadata, error) {
+	if err := sm.validateName(name); err != nil {
+		return nil, err
+	}
+
+	root := filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("environment/session: %q does not exist", name)
+		}
+
+		return nil, fmt.Errorf("unable to open environment/session %q: %w", name, err)
+	}
+
+	if !info.IsDir() {
+		return nil, fmt.Errorf("environment/session %q is not a directory", name)
+	}
+
+	// Load the metadata file for the environment.
+	metadata, err := sm.deserializeFromFile(filepath.Join(root, "metadata.json"))
+	if err != nil {
+		return nil, fmt.Errorf("load environment/session metadata: %w", err)
+	}
+
+	return metadata, nil
+}
+
 // Load loads an existing persistent named environment.
 func (sm *SessionManager) Load(name string) (*SiloSession, error) {
 	if err := sm.validateName(name); err != nil {
@@ -141,6 +171,28 @@ func (sm *SessionManager) Destroy(name string) error {
 	return os.RemoveAll(filepath.Join(NAMED_ENVIRONMENT_ROOT, name))
 }
 
+// List lists all existing persistent named environments/sessions metadata
+func (sm *SessionManager) List() ([]*Metadata, error) {
+
+	entries, err := os.ReadDir(NAMED_ENVIRONMENT_ROOT)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read environment root: %w", err)
+	}
+
+	var sessions []*Metadata
+	for _, entry := range entries {
+		if entry.IsDir() {
+			metadata, err := sm.LoadMeta(entry.Name())
+			if err != nil {
+				return nil, fmt.Errorf("load environment/session %q: %w", entry.Name(), err)
+			}
+			sessions = append(sessions, metadata)
+		}
+	}
+
+	return sessions, nil
+}
+
 func (sm *SessionManager) AcquireSessionLock(name string) (*flock.Flock, error) {
 	envPath := filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
 	lockPath := filepath.Join(envPath, SESSION_LOCK_FILE)
@@ -192,7 +244,9 @@ func (sm *SessionManager) newSession(
 			)
 
 			// populate the session's metadata with the base image details.
-			s.Metadata = NewMetadata(baseImageMetaData)
+			s.Metadata = NewMetadata(baseImageMetaData,
+				                     name,
+				                     time.Now().UTC().String())
 
 		} else {
 			return nil, fmt.Errorf("failed to find specified image %q in the catalogue", imageNameOrId)
@@ -223,7 +277,9 @@ func (sm *SessionManager) newSession(
 		)
 
 		// populate the session's metadata with the base image details.
-		s.Metadata = NewMetadata(baseImageMetaData)
+		s.Metadata = NewMetadata(baseImageMetaData,
+		                         name,
+		                         time.Now().UTC().String())
 	}
 
 	// next ensure that the base image release directory exists for the specified base image,
