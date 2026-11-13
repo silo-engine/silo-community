@@ -5,6 +5,7 @@ type Metadata struct {
 	Name      string             `json:"name"`
 	BaseImage *BaseImageMetadata `json:"base_image"`
 	CreatedAt string             `json:"created_at"`
+	Active    bool               `json:"-"`
 }
 
 // BaseImageMetadata holds information about the base image used to create the Silo session.

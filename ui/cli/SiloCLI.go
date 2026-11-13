@@ -341,7 +341,11 @@ func (scli *SiloCLI) Run() {
 
 				fmt.Println("The currently available Silo sessions are as follows:")
 				for _, session := range sessions {
-					fmt.Printf("  - %s\n", session.Name)
+					status := "inactive"
+					if session.Active {
+						status = "active"
+					}
+					fmt.Printf("  - %s (%s)\n", session.Name, status)
 				}
 			case "rm":
 				if len(args) < 3 {

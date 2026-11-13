@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,8 @@ import (
 const NAMED_ENVIRONMENT_ROOT = "/var/lib/silo/envs"
 const TRANSIENT_ENVIRONMENT_ROOT = "/var/lib/silo/tenvs"
 const SESSION_LOCK_FILE = "session.lock"
+
+var ErrSessionAlreadyActive = errors.New("session is already active")
 
 // SessionManager is responsible for managing Silo sessions, including creating, loading, and destroying them.
 // It maintains a registry of all sessions and provides methods to manage their respective lifecycles.
@@ -186,6 +189,21 @@ func (sm *SessionManager) List() ([]*Metadata, error) {
 			if err != nil {
 				return nil, fmt.Errorf("load environment/session %q: %w", entry.Name(), err)
 			}
+
+			lock, err := sm.AcquireSessionLock(entry.Name())
+			if err != nil {
+				if errors.Is(err, ErrSessionAlreadyActive) {
+					metadata.Active = true
+				} else {
+					return nil, fmt.Errorf("determine active state for %q: %w", entry.Name(), err)
+				}
+			} else {
+				metadata.Active = false
+				if err := lock.Unlock(); err != nil {
+					return nil, fmt.Errorf("release session lock for %q: %w", entry.Name(), err)
+				}
+			}
+
 			sessions = append(sessions, metadata)
 		}
 	}
@@ -204,7 +222,7 @@ func (sm *SessionManager) AcquireSessionLock(name string) (*flock.Flock, error) 
 	}
 
 	if !locked {
-		return nil, fmt.Errorf("session is already active")
+		return nil, ErrSessionAlreadyActive
 	}
 
 	return fileLock, nil
