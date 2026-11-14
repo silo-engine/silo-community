@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/silo-engine/silo-community/internal/catalogue"
+	"github.com/silo-engine/silo-community/internal/common"
 )
 
 const NAMED_ENVIRONMENT_ROOT = "/var/lib/silo/envs"
@@ -222,6 +224,117 @@ func (sm *SessionManager) List() ([]*Metadata, error) {
 	return sessions, nil
 }
 
+// Export exports a session to a file.
+func (sm *SessionManager) Export(name string, outputPath string) error {
+	if err := sm.validateName(name); err != nil {
+		return err
+	}
+
+	//ensure outputPath exists and is a directory.
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("output path %q does not exist", outputPath)
+		}
+		return fmt.Errorf("failed to stat output path %q: %w", outputPath, err)
+	}
+
+	if !info.IsDir() {
+		return fmt.Errorf("output path %q is not a directory", outputPath)
+	}
+
+	// sessions can ONLY be exported if they are not currently active, as we cannot
+	// guarantee the integrity of the session data if it is being modified while we are exporting it.
+	// Attempt to acquire a lock on the session to check if it is active.
+	lock, err := sm.AcquireSessionLock(name)
+	if err != nil {
+		if strings.Contains(err.Error(), "session is already active") {
+			return fmt.Errorf("cannot export session %q: session is currently active", name)
+		}
+		return fmt.Errorf("failed to acquire lock for session %q: %w", name, err)
+	}
+	defer func() {
+		if err := lock.Unlock(); err != nil {
+			fmt.Printf("warning: failed to release lock for session %q: %v\n", name, err)
+		}
+	}()
+
+	//create a temporary directory to build out export package including the upper layer and metadata.
+	tempExportDir, err := os.MkdirTemp("", "silo-session-export-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary export directory: %w", err)
+	}
+	defer os.RemoveAll(tempExportDir)
+
+	//load the session to be exported.
+	session, err := sm.Load(name)
+	if err != nil {
+		return fmt.Errorf("failed to load session %q: %w", name, err)
+	}
+
+	//export the upper layer of the session to as the (session filesystem) tar archive in the temporary export directory.
+	exportedFileSystemPath := filepath.Join(tempExportDir, "filesystem.tar")
+	if err := exportSessionUpperLayer(session.Upper, exportedFileSystemPath); err != nil {
+		return fmt.Errorf("failed to export session upper layer for session %q: %w", name, err)
+	}
+
+	//compute the checksum of the exported filesystem tar archive to include in the metadata for integrity verification.
+	checksum, err := common.ComputeChecksum(exportedFileSystemPath)
+	if err != nil {
+		return fmt.Errorf("failed to compute checksum for exported filesystem: %w", err)
+	}
+
+	//store the checksum to the temp export directory as a separate file for integrity verification.
+	checksumFilePath := filepath.Join(tempExportDir, "filesystem.chk")
+	if err := os.WriteFile(checksumFilePath, []byte(checksum), 0644); err != nil {
+		return fmt.Errorf("failed to write checksum file: %w", err)
+	}
+
+	//store the session metadata to the temp export directory as a separate file.
+	metadataFilePath := filepath.Join(tempExportDir, "metadata.json")
+	if err := sm.serializeToFile(metadataFilePath, session.Metadata); err != nil {
+		return fmt.Errorf("failed to serialize session metadata to file: %w", err)
+	}
+
+	//create a zip archive of the temp export directory containing the exported filesystem, checksum, and metadata.
+	// the outputpath will just be a directory thus we will want to append the name.sesh to the output path to
+	// create the final output file path.
+	fullOutputPath := filepath.Join(outputPath, name+".sesh")
+	zipCmd := exec.Command("zip", "-r", fullOutputPath, ".")
+	zipCmd.Dir = tempExportDir
+	if output, err := zipCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create %s.sesh (Silo Environment Shapshot Handle) file: %w: %s", fullOutputPath, err, output)
+	}
+
+	return nil
+}
+
+func (sm *SessionManager) Import(filePath string, name string) error {
+	if err := sm.validateName(name); err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read session file: %w", err)
+	}
+
+	var session SiloSession
+	if err := json.Unmarshal(data, &session); err != nil {
+		return fmt.Errorf("failed to unmarshal session: %w", err)
+	}
+
+	// Set the session's root directory to the new environment's root.
+	session.Root = filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
+
+	// Ensure the session's root directory is set correctly for the new environment.
+	if err := os.MkdirAll(session.Root, 0755); err != nil {
+		return fmt.Errorf("failed to create session root: %w", err)
+	}
+
+	return nil
+}
+
 func (sm *SessionManager) AcquireSessionLock(name string) (*flock.Flock, error) {
 	envPath := filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
 	lockPath := filepath.Join(envPath, SESSION_LOCK_FILE)
@@ -424,4 +537,26 @@ func (sm *SessionManager) baseImageReleaseDirExists(baseImageName string, archSt
 
 	return true
 
+}
+
+func exportSessionUpperLayer(upperDir, archivePath string) error {
+	cmd := exec.Command(
+		"tar",
+		"--create",
+		"--file="+archivePath,
+		"--directory="+upperDir,
+		"--numeric-owner",
+		"--xattrs",
+		"--xattrs-include=*",
+		"--acls",
+		"--selinux",
+		".",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("export upper layer: %w: %s", err, output)
+	}
+
+	return nil
 }

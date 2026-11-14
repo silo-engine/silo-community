@@ -175,6 +175,18 @@ func (se *SiloEngine) ListSessions() ([]*session.Metadata, error) {
 	return se.sessionManager.List()
 }
 
+// ExportSession exports the specified persistent Silo session to a tarball at the provided destination path.
+// If the specified session does not exist, an error is returned.
+func (se *SiloEngine) ExportSession(sessionName string, destinationPath string) error {
+	return se.sessionManager.Export(sessionName, destinationPath)
+}
+
+// ImportSession imports a Silo session from a tarball at the provided source path. The imported session will be
+// assigned the specified name. If a session with the specified name already exists, an error is returned.
+func (se *SiloEngine) ImportSession(sourcePath string, sessionName string) error {
+	return se.sessionManager.Import(sourcePath, sessionName)
+}
+
 //Helpers....
 
 // startSession is a helper method that encapsulates the common logic for starting both transient and persistent Silo sessions.
