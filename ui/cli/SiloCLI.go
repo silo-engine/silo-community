@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/silo-engine/silo-community/internal"
 	"github.com/silo-engine/silo-community/internal/catalogue"
@@ -339,7 +340,10 @@ func (scli *SiloCLI) Run() {
 					fatal(err)
 				}
 
+				fmt.Println()
 				fmt.Println("The currently available Silo sessions are as follows:")
+				fmt.Println()
+				/**
 				for _, session := range sessions {
 					status := "inactive"
 					if session.Active {
@@ -347,6 +351,35 @@ func (scli *SiloCLI) Run() {
 					}
 					fmt.Printf("  - %s (%s)\n", session.Name, status)
 				}
+				*/
+				//prep table data using the current session data.
+				var tableData [][]string
+
+				//first the table header...
+				tableData = append(tableData, []string{"Name", "Active", "Base Image Name", "Base Image Version", "Created At"})
+
+				//then the table data rows, one for each installed image.
+				//the created at string is formatted before being displayed in the table, to make it more human readable and succint
+				for _, session := range sessions {
+					tableData = append(tableData, []string{
+						session.Name,
+						fmt.Sprintf("%t", session.Active),
+						session.BaseImage.Distro + "-" + session.BaseImage.Version,
+						session.BaseImage.ReleaseVersion,
+						formatCreatedAt(session.CreatedAt),
+					})
+				}
+
+				//build our silo table.
+				siloTable := NewdefaultTable().
+					WithData(tableData).
+					WithColourBoolColumn(tableData, 1)
+
+				//render the silo table to the terminal.
+				if err := siloTable.Render(); err != nil {
+					fatal(err)
+				}
+
 			case "rm":
 				if len(args) < 3 {
 					fmt.Fprintln(os.Stderr, "silo: no session name provided for remove operation")
@@ -386,4 +419,26 @@ func usageAndExit() {
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "silo: %v\n", err)
 	os.Exit(1)
+}
+
+func formatCreatedAt(createdAt string) string {
+	if createdAt == "" {
+		return "n/a"
+	}
+
+	const outputLayout = "15:04 02-01-2006"
+	knownLayouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+	}
+
+	for _, layout := range knownLayouts {
+		if parsed, err := time.Parse(layout, createdAt); err == nil {
+			return parsed.Local().Format(outputLayout)
+		}
+	}
+
+	return createdAt
 }

@@ -1,11 +1,13 @@
 package session
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -15,8 +17,6 @@ import (
 const NAMED_ENVIRONMENT_ROOT = "/var/lib/silo/envs"
 const TRANSIENT_ENVIRONMENT_ROOT = "/var/lib/silo/tenvs"
 const SESSION_LOCK_FILE = "session.lock"
-
-var ErrSessionAlreadyActive = errors.New("session is already active")
 
 // SessionManager is responsible for managing Silo sessions, including creating, loading, and destroying them.
 // It maintains a registry of all sessions and provides methods to manage their respective lifecycles.
@@ -192,7 +192,7 @@ func (sm *SessionManager) List() ([]*Metadata, error) {
 
 			lock, err := sm.AcquireSessionLock(entry.Name())
 			if err != nil {
-				if errors.Is(err, ErrSessionAlreadyActive) {
+				if strings.Contains(err.Error(), "session is already active") {
 					metadata.Active = true
 				} else {
 					return nil, fmt.Errorf("determine active state for %q: %w", entry.Name(), err)
@@ -205,6 +205,17 @@ func (sm *SessionManager) List() ([]*Metadata, error) {
 			}
 
 			sessions = append(sessions, metadata)
+
+			// sort sessions by active state
+			sort.Slice(sessions, func(i, j int) bool {
+				if sessions[i].Active && !sessions[j].Active {
+					return true
+				}
+				if !sessions[i].Active && sessions[j].Active {
+					return false
+				}
+				return sessions[i].CreatedAt > sessions[j].CreatedAt
+			})
 		}
 	}
 
@@ -222,7 +233,7 @@ func (sm *SessionManager) AcquireSessionLock(name string) (*flock.Flock, error) 
 	}
 
 	if !locked {
-		return nil, ErrSessionAlreadyActive
+		return nil, errors.New("session is already active")
 	}
 
 	return fileLock, nil
@@ -263,8 +274,8 @@ func (sm *SessionManager) newSession(
 
 			// populate the session's metadata with the base image details.
 			s.Metadata = NewMetadata(baseImageMetaData,
-				                     name,
-				                     time.Now().UTC().String())
+				name,
+				time.Now().UTC().String())
 
 		} else {
 			return nil, fmt.Errorf("failed to find specified image %q in the catalogue", imageNameOrId)
@@ -296,8 +307,8 @@ func (sm *SessionManager) newSession(
 
 		// populate the session's metadata with the base image details.
 		s.Metadata = NewMetadata(baseImageMetaData,
-		                         name,
-		                         time.Now().UTC().String())
+			name,
+			time.Now().UTC().String())
 	}
 
 	// next ensure that the base image release directory exists for the specified base image,
