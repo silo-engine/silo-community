@@ -14,6 +14,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/silo-engine/silo-community/internal/catalogue"
 	"github.com/silo-engine/silo-community/internal/common"
+	
 )
 
 const NAMED_ENVIRONMENT_ROOT = "/var/lib/silo/envs"
@@ -309,30 +310,110 @@ func (sm *SessionManager) Export(name string, outputPath string) error {
 	return nil
 }
 
-func (sm *SessionManager) Import(filePath string, name string) error {
-	if err := sm.validateName(name); err != nil {
-		return err
-	}
+func (sm *SessionManager) Import(inputPath string) (*SiloSession, error) {
 
-	data, err := os.ReadFile(filePath)
+	//firstly verify path exists and is a file.
+	info, err := os.Stat(inputPath)
 	if err != nil {
-		return fmt.Errorf("failed to read session file: %w", err)
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("import file %q does not exist", inputPath)
+		}
+		return nil, fmt.Errorf("failed to stat import file %q: %w", inputPath, err)
 	}
 
-	var session SiloSession
-	if err := json.Unmarshal(data, &session); err != nil {
-		return fmt.Errorf("failed to unmarshal session: %w", err)
+	if info.IsDir() {
+		return nil, fmt.Errorf("import path %q is a directory, expected a file", inputPath)
 	}
 
-	// Set the session's root directory to the new environment's root.
-	session.Root = filepath.Join(NAMED_ENVIRONMENT_ROOT, name)
-
-	// Ensure the session's root directory is set correctly for the new environment.
-	if err := os.MkdirAll(session.Root, 0755); err != nil {
-		return fmt.Errorf("failed to create session root: %w", err)
+	//next validate that the file has a .sesh ectension, which is the expected extension for Silo Environment Snapshot Handle files.
+	if filepath.Ext(inputPath) != ".sesh" {
+		return nil, fmt.Errorf("import file %q does not have a .sesh (Silo Environment Snapshot Handle) extension", inputPath)
 	}
 
-	return nil
+	//next we will want to unzip the .sesh file to a temporary directory so we can access the contents of the archive.
+	tempImportDir, err := os.MkdirTemp("", "silo-session-import-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary import directory: %w", err)
+	}
+	defer os.RemoveAll(tempImportDir)
+
+	//unzip the .sesh file to the temporary import directory.
+	unzipCmd := exec.Command("unzip", inputPath, "-d", tempImportDir)
+	if output, err := unzipCmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("import file %q is invalid, failed to unzip: %w: %s", inputPath, err, output)
+	}
+
+	//ensure that the zip contains the expected files: filesystem.tar, filesystem.chk, and metadata.json.
+	expectedFiles := []string{"filesystem.tar", "filesystem.chk", "metadata.json"}
+	for _, expectedFile := range expectedFiles {
+		if _, err := os.Stat(filepath.Join(tempImportDir, expectedFile)); os.IsNotExist(err) {
+			return nil, fmt.Errorf("import file %q is invalid, its missing expected file %q", inputPath, expectedFile)
+		}
+	}
+
+	// next before we extract the filesystem.tar we will want to validate the checksum of the filesystem.tar against
+	// the checksum stored in the filesystem.chk file.
+	checksumInImportPackage, err := os.ReadFile(filepath.Join(tempImportDir, "filesystem.chk"))
+	if err != nil {
+		return nil, fmt.Errorf("import file %q is invalid, failed to read checksum file: %w", inputPath, err)
+	}
+	checksumInImportPackageStr := strings.TrimSpace(string(checksumInImportPackage))
+	checksumOfFilesystemTar, err := common.ComputeChecksum(filepath.Join(tempImportDir, "filesystem.tar"))
+	if err != nil {
+		return nil, fmt.Errorf("import file %q is invalid, failed to compute checksum of filesystem.tar: %w", inputPath, err)
+	}
+	if checksumInImportPackageStr != checksumOfFilesystemTar {
+		return nil, fmt.Errorf("import file %q is invalid, checksum mismatch for filesystem.tar: expected %s, got %s", inputPath, checksumInImportPackageStr, checksumOfFilesystemTar)
+	}
+
+	// at this point, filesystem.tar has been validated against the checksum stored in filesystem.chk, we can
+	// now import the upper layer of the session from the filesystem.tar archive into the current working dir
+	if err := importSessionUpperLayer(filepath.Join(tempImportDir, "filesystem.tar")); err != nil {
+		return nil, fmt.Errorf("failed to import upper layer from filesystem.tar: %w", err)
+	}
+
+	//next we create the top-level directory for the new environment/session, which will be the name of the session, and will be
+	// derived from the name of the .sesh file being imported.
+	sessionName := strings.TrimSuffix(filepath.Base(inputPath), ".sesh")
+	if err := sm.validateName(sessionName); err != nil {
+		return nil, fmt.Errorf("invalid session name derived from import file %q: %w", inputPath, err)
+	}
+
+	//create root session directory.
+	root := filepath.Join(NAMED_ENVIRONMENT_ROOT, sessionName)
+	if err := os.Mkdir(root, 0755); err != nil {
+		if os.IsExist(err) {
+			return nil, fmt.Errorf("environment %q already exists", sessionName)
+		}
+
+		return nil, fmt.Errorf("create environment %q: %w", sessionName, err)
+	}
+
+	//build imported upper layer path, that we extracted to the current working directory.
+	importedUpperLayerPath := filepath.Join(tempImportDir, "upper")
+
+	//build importedmetadata file path.
+	importedMetadataFilePath := filepath.Join(tempImportDir, "metadata.json")
+
+	//call into our helper to create a new sess from the imported upper layer and metadata.
+	sess, err := sm.newSessionFromImport(
+		root,
+		importedUpperLayerPath,
+		importedMetadataFilePath,
+		sessionName,
+		true,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create new session from import: %w", err)
+	}
+
+	//finally serilise session metadata to a file in the session's root directory for future reference.
+	if err := sm.serializeToFile(filepath.Join(sess.Root, "metadata.json"), sess.Metadata); err != nil {
+		return nil, fmt.Errorf("failed to serialize session metadata: %w", err)
+	}
+
+	return sess, nil
 }
 
 func (sm *SessionManager) AcquireSessionLock(name string) (*flock.Flock, error) {
@@ -352,12 +433,90 @@ func (sm *SessionManager) AcquireSessionLock(name string) (*flock.Flock, error) 
 	return fileLock, nil
 }
 
+func (sm *SessionManager) newSessionFromImport(
+	root string,
+	importedUpperLayerPath string,
+	importedMetadataPath string,
+	name string,
+	cleanupOnError bool) (*SiloSession, error) {
+
+	//create SiloSession object, that represents the session, to return to the caller.
+	s := &SiloSession{
+		Root:      root,
+		Upper:     filepath.Join(root, "upper"),
+		Work:      filepath.Join(root, "work"),
+		Merged:    filepath.Join(root, "merged"),
+		Transient: false,
+		Name:      name,
+	}
+
+	//first parse the imported metadata to an in-memory Metadata struct.
+	metadata, err := sm.deserializeFromFile(importedMetadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize imported metadata: %w", err)
+	}
+
+	//populate the session's metadata with the imported metadata.
+	s.Metadata = metadata
+
+	// validate thatthe imported session has an associated base image.
+	if s.Metadata.BaseImage == nil {
+		return nil, fmt.Errorf("imported session metadata is missing base image information")
+	}
+
+	//grab reference to the current system cpu arch for later use.
+	sysCPUArch, err := common.GetSystemArchType()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system architecture type: %w", err)
+	}
+
+	//next ensure that the base image referenced by the session is installed on the local system.
+	image, found := sm.catalogueManager.GetCatalogueImage(s.Metadata.BaseImage.ReleaseVersion)
+	if !found {
+		return nil, fmt.Errorf("failed to find base image %q referenced by the imported session in the catalogue", s.Metadata.BaseImage.ReleaseVersion)
+	}
+
+	// Check if the base image architecture matches the system architecture
+	if common.ArchType(image.GetArchString()) != sysCPUArch {
+		return nil, fmt.Errorf("base image %q @ version %q is for architecture %q, which does not match the current system architecture %q", s.Metadata.BaseImage.Distro+"-"+s.Metadata.BaseImage.Version, s.Metadata.BaseImage.ReleaseVersion, image.GetArchString(), sysCPUArch)
+	}
+
+	// Check if the image is installed
+	if !sm.catalogueManager.IsImageInstalled(sysCPUArch, image) {
+		return nil, fmt.Errorf("base image %q @ version %q	 is not installed. You can install it using the 'silo images pull --id %s' command.", s.Metadata.BaseImage.Distro+"-"+s.Metadata.BaseImage.Version, s.Metadata.BaseImage.ReleaseVersion, s.Metadata.BaseImage.ReleaseVersion)
+	}
+
+	//setup the directory structure for the new session, including the work, and merged directories.
+	//the upper directory will be populated by copying the imported upper layer to the session's root directory.
+	for _, dir := range []string{s.Upper, s.Work, s.Merged} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			if cleanupOnError {
+				_ = os.RemoveAll(root)
+			}
+
+			return nil, fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+
+	//move the imported upper layer to the session's upper directory.
+	//using bash mv command.
+	mvCmd := exec.Command("mv", importedUpperLayerPath, s.Upper)
+	if output, err := mvCmd.CombinedOutput(); err != nil {
+		if cleanupOnError {
+			_ = os.RemoveAll(root)
+		}
+		return nil, fmt.Errorf("failed to move imported upper layer to session upper directory: %w: %s", err, output)
+	}
+
+	return s, nil
+}
+
 func (sm *SessionManager) newSession(
 	root string,
 	transient bool,
 	name string,
 	cleanupOnError bool,
-	imageNameOrId string) (*SiloSession, error) {
+	baseImageNameOrId string) (*SiloSession, error) {
 
 	//create the new SiloSession object, that represents the active session, to return to the caller.
 	s := &SiloSession{
@@ -370,8 +529,8 @@ func (sm *SessionManager) newSession(
 	}
 
 	//if an optional image name or id was provided, attempt to find the image in the catalogue and associate it with the session.
-	if imageNameOrId != "" {
-		image, found := sm.catalogueManager.GetCatalogueImage(imageNameOrId)
+	if baseImageNameOrId != "" {
+		image, found := sm.catalogueManager.GetCatalogueImage(baseImageNameOrId)
 		if found {
 
 			//create and populate the relevant field in the sessions Metadata struct with the image details.
@@ -391,7 +550,7 @@ func (sm *SessionManager) newSession(
 				time.Now().UTC().String())
 
 		} else {
-			return nil, fmt.Errorf("failed to find specified image %q in the catalogue", imageNameOrId)
+			return nil, fmt.Errorf("failed to find specified image %q in the catalogue", baseImageNameOrId)
 		}
 	} else {
 		//otherwise if no image was specified, attempt to find the default image for the current system architecture and associate it with the session.
@@ -556,6 +715,26 @@ func exportSessionUpperLayer(upperDir, archivePath string) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("export upper layer: %w: %s", err, output)
+	}
+
+	return nil
+}
+
+func importSessionUpperLayer(archivePath string) error {
+	cmd := exec.Command(
+		"tar",
+		"--extract",
+		"--file="+archivePath,
+		"--numeric-owner",
+		"--xattrs",
+		"--xattrs-include=*",
+		"--acls",
+		"--selinux",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("import upper layer: %w: %s", err, output)
 	}
 
 	return nil

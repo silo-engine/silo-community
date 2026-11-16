@@ -1,5 +1,7 @@
 package catalogue
 
+import "github.com/silo-engine/silo-community/internal/common"
+
 // SiloImageCatalogue represents a catalogue of Silo images.
 type SiloImageCatalogue struct {
 	Version           string      `json:"version"`
@@ -10,35 +12,35 @@ type SiloImageCatalogue struct {
 	SiloImages        *SiloImages `json:"silo-images"`
 }
 
-func (c *SiloImageCatalogue) GetDefaultImage(archType ArchType) *SiloImage {
+func (c *SiloImageCatalogue) GetDefaultImage(archType common.ArchType) *SiloImage {
 	switch archType {
-	case Arm64:
+	case common.Arm64:
 		return c.DefaultArm64Image
-	case Amd64:
+	case common.Amd64:
 		return c.DefaultAmd64Image
 	default:
 		return nil
 	}
 }
 
-func (c *SiloImageCatalogue) ListImages(archType ArchType, includeEOL bool) []*SiloImage {
+func (c *SiloImageCatalogue) ListImages(archType common.ArchType, includeEOL bool) []*SiloImage {
 	switch archType {
-	case Arm64:
+	case common.Arm64:
 		if !includeEOL {
 			var nonEOLImages []*SiloImage
 			for _, image := range c.SiloImages.Arm64 {
-				if image.isEOL == false {
+				if image.IsEOL == false {
 					nonEOLImages = append(nonEOLImages, image)
 				}
 			}
 			return nonEOLImages
 		}
 		return c.SiloImages.Arm64
-	case Amd64:
+	case common.Amd64:
 		if !includeEOL {
 			var nonEOLImages []*SiloImage
 			for _, image := range c.SiloImages.Amd64 {
-				if image.isEOL == false {
+				if image.IsEOL == false {
 					nonEOLImages = append(nonEOLImages, image)
 				}
 			}
@@ -50,7 +52,7 @@ func (c *SiloImageCatalogue) ListImages(archType ArchType, includeEOL bool) []*S
 	}
 }
 
-func (c *SiloImageCatalogue) GetImageByID(archType ArchType, id string) *SiloImage {
+func (c *SiloImageCatalogue) GetImageByID(archType common.ArchType, id string) *SiloImage {
 	images := c.ListImages(archType, true) //where a specific image is requested by id, we want to include EOL images in the search, as they may still be referenced on a user's system.
 	for _, image := range images {
 		if image.ReleaseVersion == id {
@@ -60,7 +62,7 @@ func (c *SiloImageCatalogue) GetImageByID(archType ArchType, id string) *SiloIma
 	return nil
 }
 
-func (c *SiloImageCatalogue) GetImageByDistroAndVersion(archType ArchType, distro string, version string) []*SiloImage {
+func (c *SiloImageCatalogue) GetImageByDistroAndVersion(archType common.ArchType, distro string, version string) []*SiloImage {
 
 	//call into our public interface method to get all images for the specified architecture.
 	images := c.ListImages(archType, false)
@@ -85,9 +87,9 @@ type SiloImage struct {
 	ReleaseChecksum string `json:"release_checksum"`
 	Description     string `json:"description"`
 	ImageURL        string `json:"image_url"`
-	imageSize       string `json:"image_size"`
-	isEOL           bool   `json:"is_eol"`
-	catalogueName   string `json:"catalogue_name"`
+	ImageSize       string `json:"image_size"`
+	IsEOL           bool   `json:"is_eol"`
+	CatalogueName   string `json:"catalogue_name"`
 	installed       bool
 	archString      string
 }

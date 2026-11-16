@@ -395,24 +395,31 @@ func (scli *SiloCLI) Run() {
 					fmt.Fprintln(os.Stderr, "silo: no session name provided for export operation")
 					usageAndExit()
 				}
+				if len(args) < 4 {
+					fmt.Fprintln(os.Stderr, "silo: no file path provided for export operation")
+					usageAndExit()
+				}
 				sessionName := args[2]
 				filePath := args[3]
+
 				if err := scli.siloEngine.ExportSession(sessionName, filePath); err != nil {
 					fatal(err)
 				}
 				fmt.Printf("Exported Silo session/environment %q to %q\n", sessionName, filePath)
 			case "import":
+
 				if len(args) < 3 {
-					fmt.Fprintln(os.Stderr, "silo: no session name provided for import operation")
+					fmt.Fprintln(os.Stderr, "silo: no file path provided for import operation")
 					usageAndExit()
 				}
-				sessionName := args[2]
+
 				filepath := args[3]
 
-				if err := scli.siloEngine.ImportSession(sessionName, filepath); err != nil {
-					fatal(err)
+				importedSession, err := scli.siloEngine.ImportSession(filepath)
+				if err != nil {
+					fatal(fmt.Errorf("failed to import session: %w", err))
 				}
-				fmt.Printf("Imported Silo session/environment %q\n", sessionName)
+				fmt.Printf("Imported Silo session/environment %q\n", importedSession.Metadata.Name)
 			default:
 				fmt.Fprintln(os.Stderr, "silo: unknown sessions operation provided")
 				usageAndExit()

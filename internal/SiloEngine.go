@@ -170,7 +170,7 @@ func (se *SiloEngine) UpdateInstalledImages(imageIdOrName string) error {
 	return se.catalogueManager.UpdateInstalledImages(imageIdOrName)
 }
 
-//ListSessions calls into the session manager to list all existing persistent Silo sessions on the local system.
+// ListSessions calls into the session manager to list all existing persistent Silo sessions on the local system.
 func (se *SiloEngine) ListSessions() ([]*session.Metadata, error) {
 	return se.sessionManager.List()
 }
@@ -183,8 +183,8 @@ func (se *SiloEngine) ExportSession(sessionName string, destinationPath string) 
 
 // ImportSession imports a Silo session from a tarball at the provided source path. The imported session will be
 // assigned the specified name. If a session with the specified name already exists, an error is returned.
-func (se *SiloEngine) ImportSession(sourcePath string, sessionName string) error {
-	return se.sessionManager.Import(sourcePath, sessionName)
+func (se *SiloEngine) ImportSession(sourcePath string) (*session.SiloSession, error) {
+	return se.sessionManager.Import(sourcePath)
 }
 
 //Helpers....

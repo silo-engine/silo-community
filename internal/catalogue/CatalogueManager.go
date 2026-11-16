@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/gofrs/flock"
+	"github.com/silo-engine/silo-community/internal/common"
 )
 
 const IMAGE_CATALOGUES_BASE_PATH = "res/silo-images/catalogues"
@@ -30,7 +31,7 @@ type CatalogueManager struct {
 
 	// catalogues is a map of catalogues, keyed by their name.
 	catalogues     map[string]*SiloImageCatalogue
-	systemArchType ArchType
+	systemArchType common.ArchType
 }
 
 // NewCatalogueManager creates a new CatalogueManager.
@@ -50,14 +51,14 @@ func NewCatalogueManager() *CatalogueManager {
 
 	//set the system CPU architecture type, this will be used to determine which images apply to the current system
 	//currently only arm64 and amd64 are supported, but this may be extended in the future to support other architectures.
-	archType, err := GetSystemArchType()
+	archType, err :=  common.GetSystemArchType()
 	if err != nil {
 		e := errors.New("failed to get system architecture type: " + err.Error())
 		panic(e)
 	}
 
 	//check that the system architecture type is supported, if not panic as this is a fatal error.
-	if archType != Arm64 && archType != Amd64 {
+	if archType != common.Arm64 && archType != common.Amd64 {
 		e := errors.New("unsupported system architecture type: " + string(archType) + " only arm64 and amd64 are supported")
 		panic(e)
 	}
@@ -274,13 +275,13 @@ func (cm *CatalogueManager) RemoveInstalledImage(imageNameOrId string) error {
 	//set basepath acording to architecture type
 	//prepare the destination path for the downloaded image based on its architecture type and name
 	var imageInstallationBasePath string
-	archType, err := GetSystemArchType()
+	archType, err := common.GetSystemArchType()
 	if err != nil {
 		return fmt.Errorf("failed to get system architecture type: %s", err.Error())
 	}
-	if archType == Arm64 {
+	if archType == common.Arm64 {
 		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
-	} else if archType == Amd64 {
+	} else if archType == common.Amd64 {
 		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
 	} else {
 		return fmt.Errorf("unsupported architecture type: %s", archType)
@@ -329,7 +330,7 @@ func (cm *CatalogueManager) DownloadCatalogueImage(catalogueName string, imageId
 		return errors.New("catalogue not found: " + catalogueName)
 	}
 
-	archType, err := GetSystemArchType()
+	archType, err := common.GetSystemArchType()
 	if err != nil {
 		return errors.New("failed to get system architecture type: " + err.Error())
 	}
@@ -364,13 +365,13 @@ func (cm *CatalogueManager) AcquireImageLock(imageName string, exclusive bool) (
 	//set basepath acording to architecture type
 	//prepare the destination path for the downloaded image based on its architecture type and name
 	var imageInstallationBasePath string
-	archType, err := GetSystemArchType()
+	archType, err := common.GetSystemArchType()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get system architecture type: %s", err.Error())
 	}
-	if archType == Arm64 {
+	if archType == common.Arm64 {
 		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
-	} else if archType == Amd64 {
+	} else if archType == common.Amd64 {
 		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
 	} else {
 		return nil, fmt.Errorf("unsupported architecture type: %s", archType)
@@ -460,7 +461,7 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 
 	catalogueSrcPath := filepath.Join(tempDir, OFFICIAL_BASE_IMAGE_CATALOGUE_FILE_NAME)
 	catalogueDestPath := filepath.Join(catalogueDir, OFFICIAL_BASE_IMAGE_CATALOGUE_FILE_NAME)
-	if copyErr := copyFile(catalogueSrcPath, catalogueDestPath); copyErr != nil {
+	if copyErr := common.CopyFile(catalogueSrcPath, catalogueDestPath); copyErr != nil {
 		return fmt.Errorf("failed to copy catalogue file: %w", copyErr)
 	}
 	fmt.Println("Sucessfully pulled and stored the latest image catalogue.")
@@ -574,33 +575,52 @@ func (cm *CatalogueManager) UpdateInstalledImages(imageName string) error {
 	return nil
 }
 
+
+// IsImageInstalled checks if a specific Silo image is currently installed by looking for
+// the image's root folder in the IMAGE_INSTALLATION_BASE_PATH directory for the given architecture type.
+func (cm *CatalogueManager) IsImageInstalled(archType common.ArchType, image *SiloImage) bool {
+
+	var imageInstallationBasePath string
+	if archType == common.Arm64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
+	} else if archType == common.Amd64 {
+		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
+	} else {
+		return false
+	}
+
+	// build path to what the image's root release package folder would be, if it were installed, and check if it exists...
+	// If it does, the image is considered installed.
+	imageRootFolderName := image.Distro + "-" + image.Version + "--" + string(archType) + "-release"
+	destPath := filepath.Join(imageInstallationBasePath, imageRootFolderName)
+	if _, err := os.Stat(destPath); err != nil {
+		return false
+	}
+
+	//next we open and parse the manifest.json file in the image's root release package folder to check if the specific RELEASE_VERSION of the image is installed.
+	// This is important because a user may have an older version of the image installed, but not the latest version.
+	manifestFilePath := filepath.Join(destPath, "manifest.json")
+	manifestData, err := os.ReadFile(manifestFilePath)
+	if err != nil {
+		return false
+	}
+
+	var manifest Manifest
+	err = json.Unmarshal(manifestData, &manifest)
+	if err != nil {
+		return false
+	}
+
+	if manifest.ReleaseVersion == image.ReleaseVersion {
+		return true
+	}
+
+	return false
+}
+
 //helpers
 
-func copyFile(src, dst string) error {
-	sourceFileStat, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
 
-	if !sourceFileStat.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", src)
-	}
-
-	source, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-
-	destination, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destination.Close()
-
-	_, err = io.Copy(destination, source)
-	return err
-}
 
 // getInstalledImageByNameOrId retrieves an installed Silo image by its name or id. If the image is not installed, an error is returned.
 func (cm *CatalogueManager) getInstalledImageByNameOrId(imageNameOrId string) (*SiloImage, error) {
@@ -624,7 +644,7 @@ func (cm *CatalogueManager) getInstalledImageByNameOrId(imageNameOrId string) (*
 }
 
 // downloadCatalogueImageById downloads a specific Silo image from a given catalogue name and image id.
-func (cm *CatalogueManager) downloadCatalogueImageById(catalogue *SiloImageCatalogue, archType ArchType, imageId string) error {
+func (cm *CatalogueManager) downloadCatalogueImageById(catalogue *SiloImageCatalogue, archType common.ArchType, imageId string) error {
 
 	image := catalogue.GetImageByID(archType, imageId)
 	if image == nil {
@@ -643,7 +663,7 @@ func (cm *CatalogueManager) downloadCatalogueImageById(catalogue *SiloImageCatal
 // and is not unique across catalogues or architectures although silo will only ever download the image for the current
 //
 //	system architecture type, where available. If the catalogue or image does not exist, an error is returned.
-func (cm *CatalogueManager) downloadCatalogueImageByName(catalogue *SiloImageCatalogue, archType ArchType, imageName string) error {
+func (cm *CatalogueManager) downloadCatalogueImageByName(catalogue *SiloImageCatalogue, archType common.ArchType, imageName string) error {
 
 	//imageNameParts := strings.SplitN(imageName, "-", 2)
 	//if len(imageNameParts) != 2 {
@@ -729,14 +749,14 @@ func (cm *CatalogueManager) loadAllCataloguesFromJSONFiles() error {
 // markInstalledImages checks if any images in the given catalogue are already installed on the system and marks them as installed in the catalogue.
 func (cm *CatalogueManager) markInstalledImages(catalogue *SiloImageCatalogue) {
 	for _, image := range catalogue.SiloImages.Arm64 {
-		if cm.isImageInstalled(Arm64, image) {
+		if cm.IsImageInstalled(common.Arm64, image) {
 			image.SetInstalled(true)
 		} else {
 			image.SetInstalled(false)
 		}
 	}
 	for _, image := range catalogue.SiloImages.Amd64 {
-		if cm.isImageInstalled(Amd64, image) {
+		if cm.IsImageInstalled(common.Amd64, image) {
 			image.SetInstalled(true)
 		} else {
 			image.SetInstalled(false)
@@ -755,50 +775,10 @@ func (cm *CatalogueManager) setSiloImageArchString(catalogue *SiloImageCatalogue
 	}
 }
 
-// isImageInstalled checks if a specific Silo image is currently installed by looking for
-// the image's root folder in the IMAGE_INSTALLATION_BASE_PATH directory for the given architecture type.
-func (cm *CatalogueManager) isImageInstalled(archType ArchType, image *SiloImage) bool {
 
-	var imageInstallationBasePath string
-	if archType == Arm64 {
-		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
-	} else if archType == Amd64 {
-		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
-	} else {
-		return false
-	}
-
-	// build path to what the image's root release package folder would be, if it were installed, and check if it exists...
-	// If it does, the image is considered installed.
-	imageRootFolderName := image.Distro + "-" + image.Version + "--" + string(archType) + "-release"
-	destPath := filepath.Join(imageInstallationBasePath, imageRootFolderName)
-	if _, err := os.Stat(destPath); err != nil {
-		return false
-	}
-
-	//next we open and parse the manifest.json file in the image's root release package folder to check if the specific RELEASE_VERSION of the image is installed.
-	// This is important because a user may have an older version of the image installed, but not the latest version.
-	manifestFilePath := filepath.Join(destPath, "manifest.json")
-	manifestData, err := os.ReadFile(manifestFilePath)
-	if err != nil {
-		return false
-	}
-
-	var manifest Manifest
-	err = json.Unmarshal(manifestData, &manifest)
-	if err != nil {
-		return false
-	}
-
-	if manifest.ReleaseVersion == image.ReleaseVersion {
-		return true
-	}
-
-	return false
-}
 
 // downloadAndUnpackCatalogueImage downloads a specific Silo image from a given catalogue name, architecture type, and image name to a specified destination path.
-func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, archType ArchType) error {
+func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, archType common.ArchType) error {
 
 	fmt.Println("\nDownloading Silo image:", image.Distro, image.Version, "for architecture:", archType, "standby this may take a few minutes depending on your internet connection...")
 	imageURL := image.ImageURL
@@ -860,9 +840,9 @@ func (cm *CatalogueManager) downloadAndUnpackCatalogueImage(image *SiloImage, ar
 
 	//prepare the destination path for the downloaded image based on its architecture type and name
 	var imageInstallationBasePath string
-	if archType == Arm64 {
+	if archType == common.Arm64 {
 		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_ARM64
-	} else if archType == Amd64 {
+	} else if archType == common.Amd64 {
 		imageInstallationBasePath = IMAGE_INSTALLATION_BASE_PATH_AMD64
 	} else {
 		return fmt.Errorf("unsupported architecture type: %s", archType)
