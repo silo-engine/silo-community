@@ -483,7 +483,7 @@ func (sm *SessionManager) newSessionFromImport(
 
 	// Check if the image is installed
 	if !sm.catalogueManager.IsImageInstalled(sysCPUArch, image) {
-		return nil, fmt.Errorf("base image %q @ version %q	 is not installed. You can install it using the 'silo images pull --id %s' command.", s.Metadata.BaseImage.Distro+"-"+s.Metadata.BaseImage.Version, s.Metadata.BaseImage.ReleaseVersion, s.Metadata.BaseImage.ReleaseVersion)
+		return nil, fmt.Errorf("base image %q @ version %q	 is not installed. You can install it using the 'sudo silo images pull --id %s' command.", s.Metadata.BaseImage.Distro+"-"+s.Metadata.BaseImage.Version, s.Metadata.BaseImage.ReleaseVersion, s.Metadata.BaseImage.ReleaseVersion)
 	}
 
 	//setup the directory structure for the new session, including the work, and merged directories.
@@ -587,7 +587,7 @@ func (sm *SessionManager) newSession(
 	imageNameVersionAndArch := s.Metadata.BaseImage.Distro + "-" + s.Metadata.BaseImage.Version + "--" + s.Metadata.BaseImage.ArchString
 	imageNameAndVersion := s.Metadata.BaseImage.Distro + "-" + s.Metadata.BaseImage.Version
 	if !sm.baseImageReleaseDirExists(imageNameVersionAndArch, s.Metadata.BaseImage.ArchString) {
-		return nil, fmt.Errorf("The specified base image: %q exists in the catalogue, but DOES NOT appear to have been installed. You can install it using: \n 'silo images pull --name %s' ", imageNameAndVersion, imageNameAndVersion)
+		return nil, fmt.Errorf("The specified base image: %q exists in the catalogue, but DOES NOT appear to have been installed. You can install it using: \n 'sudo silo images pull --name %s' ", imageNameAndVersion, imageNameAndVersion)
 	}
 
 	//setup the directory structure for the new session, including the upper, work, and merged directories.

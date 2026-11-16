@@ -117,7 +117,7 @@ func (m *OverlayManager) validateBaseImageReleaseChecksum(session *session.SiloS
 
 	//compare the checksum read from the file with the checksum specified in the session's metadata.
 	if checksum != session.Metadata.BaseImage.ReleaseChecksum {
-		return fmt.Errorf("base image release checksum mismatch: expected %s, got %s this indicates that the session you are attempting to load requires a different version of the specified base image. You can download the correct base image version for this session by running: \n silo images pull --id %s ", session.Metadata.BaseImage.ReleaseChecksum, checksum, session.Metadata.BaseImage.ReleaseVersion)
+		return fmt.Errorf("base image release checksum mismatch: expected %s, got %s this indicates that the session you are attempting to load requires a different version of the specified base image. You can download the correct base image version for this session by running: \n sudo silo images pull --id %s ", session.Metadata.BaseImage.ReleaseChecksum, checksum, session.Metadata.BaseImage.ReleaseVersion)
 	}
 
 	return nil
