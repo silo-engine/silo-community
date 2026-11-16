@@ -14,7 +14,6 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/silo-engine/silo-community/internal/catalogue"
 	"github.com/silo-engine/silo-community/internal/common"
-	
 )
 
 const NAMED_ENVIRONMENT_ROOT = "/var/lib/silo/envs"
@@ -366,9 +365,10 @@ func (sm *SessionManager) Import(inputPath string) (*SiloSession, error) {
 		return nil, fmt.Errorf("import file %q is invalid, checksum mismatch for filesystem.tar: expected %s, got %s", inputPath, checksumInImportPackageStr, checksumOfFilesystemTar)
 	}
 
-	// at this point, filesystem.tar has been validated against the checksum stored in filesystem.chk, we can
-	// now import the upper layer of the session from the filesystem.tar archive into the current working dir
-	if err := importSessionUpperLayer(filepath.Join(tempImportDir, "filesystem.tar")); err != nil {
+	// at this point, filesystem.tar has been validated against the checksum stored in filesystem.chk.
+	// Extract it into a dedicated "upper" directory inside the import temp directory.
+	importedUpperLayerPath := filepath.Join(tempImportDir, "upper")
+	if err := importSessionUpperLayer(filepath.Join(tempImportDir, "filesystem.tar"), importedUpperLayerPath); err != nil {
 		return nil, fmt.Errorf("failed to import upper layer from filesystem.tar: %w", err)
 	}
 
@@ -388,9 +388,6 @@ func (sm *SessionManager) Import(inputPath string) (*SiloSession, error) {
 
 		return nil, fmt.Errorf("create environment %q: %w", sessionName, err)
 	}
-
-	//build imported upper layer path, that we extracted to the current working directory.
-	importedUpperLayerPath := filepath.Join(tempImportDir, "upper")
 
 	//build importedmetadata file path.
 	importedMetadataFilePath := filepath.Join(tempImportDir, "metadata.json")
@@ -486,9 +483,9 @@ func (sm *SessionManager) newSessionFromImport(
 		return nil, fmt.Errorf("base image %q @ version %q	 is not installed. You can install it using the 'sudo silo images pull --id %s' command.", s.Metadata.BaseImage.Distro+"-"+s.Metadata.BaseImage.Version, s.Metadata.BaseImage.ReleaseVersion, s.Metadata.BaseImage.ReleaseVersion)
 	}
 
-	//setup the directory structure for the new session, including the work, and merged directories.
-	//the upper directory will be populated by copying the imported upper layer to the session's root directory.
-	for _, dir := range []string{s.Upper, s.Work, s.Merged} {
+	//setup the directory structure for the new session.
+	//Do not pre-create s.Upper because we move the extracted upper directory into place below.
+	for _, dir := range []string{s.Work, s.Merged} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			if cleanupOnError {
 				_ = os.RemoveAll(root)
@@ -720,11 +717,16 @@ func exportSessionUpperLayer(upperDir, archivePath string) error {
 	return nil
 }
 
-func importSessionUpperLayer(archivePath string) error {
+func importSessionUpperLayer(archivePath string, destinationDir string) error {
+	if err := os.MkdirAll(destinationDir, 0755); err != nil {
+		return fmt.Errorf("create import destination: %w", err)
+	}
+
 	cmd := exec.Command(
 		"tar",
 		"--extract",
 		"--file="+archivePath,
+		"--directory="+destinationDir,
 		"--numeric-owner",
 		"--xattrs",
 		"--xattrs-include=*",

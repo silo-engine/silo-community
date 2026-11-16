@@ -413,7 +413,7 @@ func (scli *SiloCLI) Run() {
 					usageAndExit()
 				}
 
-				filepath := args[3]
+				filepath := args[2]
 
 				importedSession, err := scli.siloEngine.ImportSession(filepath)
 				if err != nil {
